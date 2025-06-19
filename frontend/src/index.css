@@ -1,0 +1,78 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    /* Removed invalid border-border class */
+  }
+  
+  body {
+    @apply bg-dark-950 text-white font-sans;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-gradient-to-r from-cockpit-600 to-purple-600 hover:from-cockpit-700 hover:to-purple-700 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-cockpit-500 focus:ring-offset-2 focus:ring-offset-dark-950;
+  }
+  
+  .btn-secondary {
+    @apply bg-dark-800 hover:bg-dark-700 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-dark-600 focus:ring-offset-2 focus:ring-offset-dark-950;
+  }
+  
+  .input-field {
+    @apply bg-dark-800 border border-dark-600 text-white placeholder-dark-400 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-cockpit-500 focus:border-transparent transition-all duration-200;
+  }
+  
+  .card {
+    @apply bg-dark-900 border border-dark-700 rounded-xl shadow-xl backdrop-blur-sm;
+  }
+  
+  .message-bubble {
+    @apply max-w-xs lg:max-w-md px-4 py-2 rounded-2xl break-words;
+  }
+  
+  .message-bubble-sent {
+    @apply bg-gradient-to-r from-cockpit-600 to-purple-600 text-white;
+  }
+  
+  .message-bubble-received {
+    @apply bg-dark-700 text-white;
+  }
+  
+  .sidebar-item {
+    @apply flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-200 cursor-pointer hover:bg-dark-800;
+  }
+  
+  .sidebar-item-active {
+    @apply bg-dark-800 border-l-4 border-cockpit-500;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  
+  .text-gradient {
+    @apply bg-gradient-to-r from-cockpit-400 to-purple-400 bg-clip-text text-transparent;
+  }
+  
+  .glass-effect {
+    @apply bg-white/5 backdrop-blur-md border border-white/10;
+  }
+} 
