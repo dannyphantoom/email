@@ -1,8 +1,15 @@
 #include "config.h"
+#include <cstdlib>
 
 // Gmail OAuth2 Configuration
-const std::string GmailConfig::CLIENT_ID = "YOUR_GMAIL_CLIENT_ID";
-const std::string GmailConfig::CLIENT_SECRET = "YOUR_GMAIL_CLIENT_SECRET";
+const std::string GmailConfig::CLIENT_ID = []{
+    const char* val = std::getenv("GMAIL_CLIENT_ID");
+    return val ? std::string(val) : std::string("YOUR_GMAIL_CLIENT_ID");
+}();
+const std::string GmailConfig::CLIENT_SECRET = []{
+    const char* val = std::getenv("GMAIL_CLIENT_SECRET");
+    return val ? std::string(val) : std::string("YOUR_GMAIL_CLIENT_SECRET");
+}();
 const std::string GmailConfig::REDIRECT_URI = "http://localhost:8080/oauth/gmail/callback";
 const std::string GmailConfig::AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const std::string GmailConfig::TOKEN_URL = "https://oauth2.googleapis.com/token";

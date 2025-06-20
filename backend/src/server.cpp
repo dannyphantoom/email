@@ -58,6 +58,12 @@ void Server::setupRoutes() {
     routes["/integration/connect/gmail"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
         handleAccountIntegrationRoutes(method, path, body, response);
     };
+    routes["/integration/connect/gmail/oauth2"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleAccountIntegrationRoutes(method, path, body, response);
+    };
+    routes["/integration/gmail/oauth2/url"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleAccountIntegrationRoutes(method, path, body, response);
+    };
     routes["/integration/connect/whatsapp"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
         handleAccountIntegrationRoutes(method, path, body, response);
     };
@@ -304,6 +310,39 @@ void Server::handleAccountIntegrationRoutes(const std::string& method, const std
                 response = createJSONResponse(true, "Gmail account connected successfully");
             } else {
                 response = createErrorResponse("Failed to connect Gmail account");
+            }
+        }
+        else if (method == "GET" && path == "/integration/gmail/oauth2/url") {
+            // Return Gmail OAuth2 authorization URL
+            std::string url = accountManager.getGmailOAuth2Url();
+            json data;
+            data["url"] = url;
+            response = createJSONResponse(true, "Gmail OAuth2 URL generated", data.dump());
+        }
+        else if (method == "POST" && path == "/integration/connect/gmail/oauth2") {
+            // Complete Gmail OAuth2 connection using authorization code
+            std::string userId = getAuthToken(headers);
+            if (userId.empty()) {
+                response = createErrorResponse("Unauthorized");
+                return;
+            }
+
+            json requestJson = json::parse(body);
+            std::string email = requestJson["email"];
+            std::string code = requestJson["code"];
+
+            std::string accessToken;
+            std::string refreshToken;
+            if (!accountManager.exchangeGmailCodeForTokens(code, accessToken, refreshToken)) {
+                response = createErrorResponse("Failed to exchange OAuth2 code");
+                return;
+            }
+
+            bool success = accountManager.connectGmailOAuth2(userId, email, accessToken, refreshToken);
+            if (success) {
+                response = createJSONResponse(true, "Gmail account connected via OAuth2");
+            } else {
+                response = createErrorResponse("Failed to connect Gmail via OAuth2");
             }
         }
         else if (method == "POST" && path == "/integration/connect/whatsapp") {
