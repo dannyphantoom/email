@@ -34,9 +34,29 @@ export interface ConnectGmailRequest {
   password: string;
 }
 
+export interface ConnectGmailOAuth2Request {
+  email: string;
+  code: string;
+}
+
 export interface ConnectWhatsAppRequest {
   phoneNumber: string;
   password: string;
+}
+
+export interface ConnectWhatsAppWebRequest {
+  phoneNumber: string;
+  sessionId: string;
+}
+
+export interface ConnectTelegramRequest {
+  phoneNumber: string;
+  code: string;
+}
+
+export interface ConnectTelegramBotRequest {
+  botToken: string;
+  chatId: string;
 }
 
 class AccountIntegrationService {
@@ -109,6 +129,36 @@ class AccountIntegrationService {
     }
   }
 
+  // Connect Gmail account via OAuth2
+  async connectGmailOAuth2(request: ConnectGmailOAuth2Request): Promise<boolean> {
+    try {
+      await this.makeRequest('/integration/connect/gmail/oauth2', {
+        method: 'POST',
+        body: JSON.stringify(request)
+      });
+      
+      toast.success('Gmail account connected successfully via OAuth2!');
+      return true;
+    } catch (error) {
+      console.error('Failed to connect Gmail via OAuth2:', error);
+      toast.error('Failed to connect Gmail account via OAuth2. Please try again.');
+      return false;
+    }
+  }
+
+  // Get Gmail OAuth2 URL
+  async getGmailOAuth2Url(): Promise<string> {
+    try {
+      const response = await this.makeRequest<{ url: string }>('/integration/gmail/oauth2/url', {
+        method: 'GET'
+      });
+      return response.url;
+    } catch (error) {
+      console.error('Failed to get Gmail OAuth2 URL:', error);
+      throw error;
+    }
+  }
+
   // Connect WhatsApp account
   async connectWhatsApp(request: ConnectWhatsAppRequest): Promise<boolean> {
     try {
@@ -122,6 +172,57 @@ class AccountIntegrationService {
     } catch (error) {
       console.error('Failed to connect WhatsApp:', error);
       toast.error('Failed to connect WhatsApp account. Please check your credentials.');
+      return false;
+    }
+  }
+
+  // Connect WhatsApp Web account
+  async connectWhatsAppWeb(request: ConnectWhatsAppWebRequest): Promise<boolean> {
+    try {
+      await this.makeRequest('/integration/connect/whatsapp/web', {
+        method: 'POST',
+        body: JSON.stringify(request)
+      });
+      
+      toast.success('WhatsApp Web account connected successfully!');
+      return true;
+    } catch (error) {
+      console.error('Failed to connect WhatsApp Web:', error);
+      toast.error('Failed to connect WhatsApp Web account. Please check your session ID.');
+      return false;
+    }
+  }
+
+  // Connect Telegram account
+  async connectTelegram(request: ConnectTelegramRequest): Promise<boolean> {
+    try {
+      await this.makeRequest('/integration/connect/telegram', {
+        method: 'POST',
+        body: JSON.stringify(request)
+      });
+      
+      toast.success('Telegram account connected successfully!');
+      return true;
+    } catch (error) {
+      console.error('Failed to connect Telegram:', error);
+      toast.error('Failed to connect Telegram account. Please check your credentials.');
+      return false;
+    }
+  }
+
+  // Connect Telegram Bot account
+  async connectTelegramBot(request: ConnectTelegramBotRequest): Promise<boolean> {
+    try {
+      await this.makeRequest('/integration/connect/telegram/bot', {
+        method: 'POST',
+        body: JSON.stringify(request)
+      });
+      
+      toast.success('Telegram Bot connected successfully!');
+      return true;
+    } catch (error) {
+      console.error('Failed to connect Telegram Bot:', error);
+      toast.error('Failed to connect Telegram Bot. Please check your bot token and chat ID.');
       return false;
     }
   }

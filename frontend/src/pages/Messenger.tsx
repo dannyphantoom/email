@@ -72,7 +72,7 @@ const Messenger: React.FC = () => {
         {selectedChat ? (
           <ChatWindow chatId={selectedChat} />
         ) : (
-          <div className="flex-1 flex items-center justify-center">
+          <div className="flex-1 flex items-center justify-center chat-animated-bg">
             <div className="text-center">
               <div className="w-24 h-24 bg-gradient-to-r from-cockpit-600 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-6">
                 <MessageCircle className="w-12 h-12 text-white" />

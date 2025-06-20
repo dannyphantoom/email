@@ -115,7 +115,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId }) => {
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 chat-animated-bg">
         {messages.map((message) => (
           <div
             key={message.id}

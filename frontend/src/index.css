@@ -56,6 +56,100 @@
   .sidebar-item-active {
     @apply bg-dark-800 border-l-4 border-cockpit-500;
   }
+  
+  /* Chat Patterned Background */
+  .chat-patterned-bg {
+    background-color: #1a1a1a;
+    background-image: 
+      radial-gradient(ellipse 800px 600px at 20% 20%, rgba(139, 92, 246, 0.06) 0%, transparent 50%),
+      radial-gradient(ellipse 600px 800px at 80% 80%, rgba(59, 130, 246, 0.06) 0%, transparent 50%),
+      radial-gradient(ellipse 1000px 400px at 50% 50%, rgba(139, 92, 246, 0.03) 0%, transparent 60%);
+    background-size: 100% 100%, 100% 100%, 100% 100%;
+    background-position: 0 0, 0 0, 0 0;
+    position: relative;
+  }
+  
+  .chat-patterned-bg::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: 
+      linear-gradient(135deg, transparent 0%, rgba(139, 92, 246, 0.02) 50%, transparent 100%),
+      linear-gradient(45deg, transparent 0%, rgba(59, 130, 246, 0.02) 50%, transparent 100%);
+    pointer-events: none;
+  }
+  
+  /* Alternative geometric pattern */
+  .chat-geometric-bg {
+    background-color: #1a1a1a;
+    background-image: 
+      conic-gradient(from 0deg at 50% 50%, rgba(139, 92, 246, 0.03) 0deg, transparent 60deg, rgba(139, 92, 246, 0.03) 120deg, transparent 180deg, rgba(139, 92, 246, 0.03) 240deg, transparent 300deg),
+      conic-gradient(from 180deg at 30% 70%, rgba(59, 130, 246, 0.03) 0deg, transparent 90deg, rgba(59, 130, 246, 0.03) 180deg, transparent 270deg);
+    background-size: 100% 100%, 100% 100%;
+    background-position: 0 0, 0 0;
+  }
+  
+  /* Subtle dot pattern */
+  .chat-dot-pattern-bg {
+    background-color: #1a1a1a;
+    background-image: 
+      radial-gradient(circle at 50% 50%, rgba(139, 92, 246, 0.04) 0%, transparent 50%),
+      radial-gradient(circle at 25% 25%, rgba(59, 130, 246, 0.03) 0%, transparent 40%),
+      radial-gradient(circle at 75% 75%, rgba(139, 92, 246, 0.03) 0%, transparent 40%);
+    background-size: 100% 100%, 100% 100%, 100% 100%;
+    background-position: 0 0, 0 0, 0 0;
+  }
+  
+  /* Animated subtle pattern - Updated with smooth organic patterns */
+  .chat-animated-bg {
+    background-color: #1a1a1a;
+    background-image: 
+      radial-gradient(ellipse 1200px 800px at 20% 20%, rgba(139, 92, 246, 0.08) 0%, rgba(139, 92, 246, 0.02) 40%, transparent 70%),
+      radial-gradient(ellipse 800px 1200px at 80% 80%, rgba(59, 130, 246, 0.08) 0%, rgba(59, 130, 246, 0.02) 40%, transparent 70%),
+      radial-gradient(ellipse 1000px 1000px at 50% 50%, rgba(139, 92, 246, 0.04) 0%, transparent 60%),
+      radial-gradient(ellipse 600px 900px at 10% 90%, rgba(59, 130, 246, 0.04) 0%, transparent 50%),
+      radial-gradient(ellipse 900px 600px at 90% 10%, rgba(139, 92, 246, 0.03) 0%, transparent 50%),
+      conic-gradient(from 0deg at 30% 30%, rgba(139, 92, 246, 0.02) 0deg, transparent 120deg, rgba(139, 92, 246, 0.02) 240deg, transparent 360deg),
+      conic-gradient(from 180deg at 70% 70%, rgba(59, 130, 246, 0.02) 0deg, transparent 120deg, rgba(59, 130, 246, 0.02) 240deg, transparent 360deg);
+    background-size: 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%;
+    background-position: 0% 0%, 100% 100%, 50% 50%, 0% 100%, 100% 0%, 0 0, 0 0;
+    animation: smoothFloat 60s ease-in-out infinite, gentlePulse 120s ease-in-out infinite;
+  }
+  
+  @keyframes smoothFloat {
+    0%, 100% {
+      background-position: 0% 0%, 100% 100%, 50% 50%, 0% 100%, 100% 0%, 0 0, 0 0;
+    }
+    16.66% {
+      background-position: 15% 10%, 85% 90%, 65% 35%, 15% 85%, 85% 15%, 10% 10%, 90% 90%;
+    }
+    33.33% {
+      background-position: 30% 20%, 70% 80%, 80% 20%, 30% 70%, 70% 30%, 20% 20%, 80% 80%;
+    }
+    50% {
+      background-position: 45% 30%, 55% 70%, 35% 65%, 45% 55%, 55% 45%, 30% 30%, 70% 70%;
+    }
+    66.66% {
+      background-position: 60% 40%, 40% 60%, 20% 80%, 60% 40%, 40% 60%, 40% 40%, 60% 60%;
+    }
+    83.33% {
+      background-position: 75% 50%, 25% 50%, 5% 95%, 75% 25%, 25% 75%, 50% 50%, 50% 50%;
+    }
+  }
+  
+  @keyframes gentlePulse {
+    0%, 100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.95;
+      transform: scale(1.02);
+    }
+  }
 }
 
 @layer utilities {

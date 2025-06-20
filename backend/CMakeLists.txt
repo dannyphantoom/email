@@ -27,6 +27,8 @@ set(SOURCES
     src/auth.cpp
     src/group_chat.cpp
     src/account_integration.cpp
+    src/config.cpp
+    src/json_parser.cpp
 )
 
 # Header files
@@ -40,6 +42,8 @@ set(HEADERS
     include/auth.h
     include/group_chat.h
     include/account_integration.h
+    include/config.h
+    include/json_parser.h
 )
 
 # Create executable

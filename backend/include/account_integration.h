@@ -35,6 +35,9 @@ struct AccountCredentials {
     std::string password;
     std::string accessToken;
     std::string refreshToken;
+    std::string apiKey;           // For Telegram Bot API
+    std::string botToken;         // For Telegram Bot API
+    std::string sessionId;        // For WhatsApp Web
     std::chrono::system_clock::time_point tokenExpiry;
     bool isActive;
     std::chrono::system_clock::time_point lastSync;
@@ -75,9 +78,17 @@ public:
 
     // Provider-specific methods
     bool connectGmail(const std::string& userId, const std::string& email, const std::string& password);
+    bool connectGmailOAuth2(const std::string& userId, const std::string& email, const std::string& accessToken, const std::string& refreshToken);
     bool connectOutlook(const std::string& userId, const std::string& email, const std::string& password);
     bool connectWhatsApp(const std::string& userId, const std::string& phoneNumber, const std::string& password);
+    bool connectWhatsAppWeb(const std::string& userId, const std::string& phoneNumber, const std::string& sessionId);
     bool connectTelegram(const std::string& userId, const std::string& phoneNumber, const std::string& code);
+    bool connectTelegramBot(const std::string& userId, const std::string& botToken, const std::string& chatId);
+
+    // OAuth2 helpers
+    std::string getGmailOAuth2Url();
+    bool exchangeGmailCodeForTokens(const std::string& code, std::string& accessToken, std::string& refreshToken);
+    bool refreshGmailToken(const std::string& refreshToken, std::string& newAccessToken);
 
     // Message Actions
     bool markMessageAsRead(const std::string& userId, const std::string& messageId);
@@ -99,18 +110,25 @@ private:
 
     // Provider-specific implementations
     std::vector<UnifiedMessage> fetchGmailMessages(const AccountCredentials& account);
+    std::vector<UnifiedMessage> fetchGmailMessagesOAuth2(const AccountCredentials& account);
     std::vector<UnifiedMessage> fetchOutlookMessages(const AccountCredentials& account);
     std::vector<UnifiedMessage> fetchWhatsAppMessages(const AccountCredentials& account);
+    std::vector<UnifiedMessage> fetchWhatsAppMessagesWeb(const AccountCredentials& account);
     std::vector<UnifiedMessage> fetchTelegramMessages(const AccountCredentials& account);
+    std::vector<UnifiedMessage> fetchTelegramBotMessages(const AccountCredentials& account);
     
     // Connection testing
     bool testGmailConnection(const std::string& email, const std::string& password);
+    bool testGmailOAuth2Connection(const std::string& accessToken);
+    bool testWhatsAppWebConnection(const std::string& sessionId);
+    bool testTelegramBotConnection(const std::string& botToken);
     
     // Helper methods
     std::string generateAccountId();
     std::string generateMessageId();
     bool validateCredentials(const AccountCredentials& credentials);
     std::chrono::system_clock::time_point getCurrentTime();
+    struct curl_slist* createAuthHeader(const std::string& accessToken);
 
     // Member variables
     std::map<std::string, AccountCredentials> activeAccounts;
