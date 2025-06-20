@@ -2,23 +2,71 @@
 #include "database.h"
 #include "user_manager.h"
 #include "message_handler.h"
+#include "group_chat.h"
+#include "auth.h"
 #include "websocket_handler.h"
 #include <iostream>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/epoll.h>
+#include <sstream>
+#include <regex>
+#include <nlohmann/json.hpp>
 #include <cstring>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <thread>
+#include <chrono>
+#include <fcntl.h>
 
-Server::Server(int port) : port_(port), serverSocket_(-1), running_(false) {
-    // Initialize components
-    database_ = std::make_shared<Database>();
-    userManager_ = std::make_shared<UserManager>(database_);
-    messageHandler_ = std::make_shared<MessageHandler>(database_, userManager_);
-    wsHandler_ = std::make_shared<WebSocketHandler>(messageHandler_, userManager_);
+using json = nlohmann::json;
+
+Server::Server(int port) : port_(port), running_(false), database_(std::make_shared<Database>()), 
+                          userManager_(std::make_shared<UserManager>(database_)),
+                          messageHandler_(std::make_shared<MessageHandler>(database_, userManager_)),
+                          wsHandler_(std::make_shared<WebSocketHandler>(messageHandler_, userManager_)) {
+    setupRoutes();
 }
 
 Server::~Server() {
     stop();
+}
+
+void Server::setupRoutes() {
+    routes["/auth/register"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleAuthRoutes(method, path, body, response);
+    };
+    routes["/auth/login"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleAuthRoutes(method, path, body, response);
+    };
+    routes["/auth/logout"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleAuthRoutes(method, path, body, response);
+    };
+    routes["/users"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleUserRoutes(method, path, body, response);
+    };
+    routes["/messages"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleMessageRoutes(method, path, body, response);
+    };
+    routes["/groups"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleGroupRoutes(method, path, body, response);
+    };
+    
+    // Account integration routes
+    routes["/integration/accounts"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleAccountIntegrationRoutes(method, path, body, response);
+    };
+    routes["/integration/connect/gmail"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleAccountIntegrationRoutes(method, path, body, response);
+    };
+    routes["/integration/connect/whatsapp"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleAccountIntegrationRoutes(method, path, body, response);
+    };
+    routes["/integration/messages"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleAccountIntegrationRoutes(method, path, body, response);
+    };
+    routes["/integration/sync"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleAccountIntegrationRoutes(method, path, body, response);
+    };
 }
 
 bool Server::initialize() {
@@ -139,4 +187,215 @@ void Server::cleanup() {
         close(serverSocket_);
         serverSocket_ = -1;
     }
+}
+
+// JSON helper methods
+std::string Server::createJSONResponse(bool success, const std::string& message, const std::string& data) {
+    json response;
+    response["success"] = success;
+    response["message"] = message;
+    if (!data.empty()) {
+        response["data"] = json::parse(data);
+    }
+    return response.dump();
+}
+
+std::string Server::createErrorResponse(const std::string& error) {
+    return createJSONResponse(false, error);
+}
+
+// CORS headers
+void Server::addCORSHeaders(std::string& response) {
+    std::string corsHeaders = "Access-Control-Allow-Origin: *\r\n";
+    corsHeaders += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    corsHeaders += "Access-Control-Allow-Headers: Content-Type, Authorization\r\n";
+    corsHeaders += "Access-Control-Max-Age: 86400\r\n";
+    
+    // Insert CORS headers after the status line
+    size_t pos = response.find("\r\n");
+    if (pos != std::string::npos) {
+        response.insert(pos + 2, corsHeaders);
+    }
+}
+
+// Authentication token handling
+std::string Server::getAuthToken(const std::map<std::string, std::string>& headers) {
+    auto it = headers.find("authorization");
+    if (it != headers.end()) {
+        std::string authHeader = it->second;
+        if (authHeader.substr(0, 7) == "Bearer ") {
+            return authHeader.substr(7);
+        }
+    }
+    return "";
+}
+
+bool Server::validateToken(const std::string& token, std::string& userId) {
+    // TODO: Implement proper JWT token validation
+    // For now, return true if token is not empty
+    if (!token.empty()) {
+        userId = "user123"; // Mock user ID
+        return true;
+    }
+    return false;
+}
+
+void Server::handleAccountIntegrationRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+    try {
+        // Parse headers from the request (this would need to be passed from the calling method)
+        std::map<std::string, std::string> headers;
+        // TODO: Extract headers from the actual request
+        
+        if (method == "GET" && path == "/integration/accounts") {
+            // Get user's connected accounts
+            std::string userId = getAuthToken(headers);
+            if (userId.empty()) {
+                response = createErrorResponse("Unauthorized");
+                return;
+            }
+            
+            auto accounts = accountManager.getUserAccounts(userId);
+            json accountsArray = json::array();
+            
+            for (const auto& account : accounts) {
+                json accountJson;
+                accountJson["id"] = account.id;
+                accountJson["type"] = (account.type == AccountType::EMAIL) ? "email" : "messenger";
+                accountJson["provider"] = [&account]() {
+                    switch (account.provider) {
+                        case ProviderType::GMAIL: return "Gmail";
+                        case ProviderType::OUTLOOK: return "Outlook";
+                        case ProviderType::YAHOO_MAIL: return "Yahoo Mail";
+                        case ProviderType::PROTONMAIL: return "ProtonMail";
+                        case ProviderType::WHATSAPP: return "WhatsApp";
+                        case ProviderType::TELEGRAM: return "Telegram";
+                        case ProviderType::FACEBOOK_MESSENGER: return "Facebook Messenger";
+                        case ProviderType::TWITTER_DM: return "Twitter DM";
+                        case ProviderType::INSTAGRAM_DM: return "Instagram DM";
+                        default: return "Unknown";
+                    }
+                }();
+                accountJson["email"] = account.email;
+                accountJson["username"] = account.username;
+                accountJson["isActive"] = account.isActive;
+                accountJson["lastSync"] = std::chrono::duration_cast<std::chrono::seconds>(
+                    account.lastSync.time_since_epoch()).count();
+                
+                accountsArray.push_back(accountJson);
+            }
+            
+            response = createJSONResponse(true, "Accounts retrieved successfully", accountsArray.dump());
+        }
+        else if (method == "POST" && path == "/integration/connect/gmail") {
+            // Connect Gmail account
+            std::string userId = getAuthToken(headers);
+            if (userId.empty()) {
+                response = createErrorResponse("Unauthorized");
+                return;
+            }
+            
+            json requestJson = json::parse(body);
+            std::string email = requestJson["email"];
+            std::string password = requestJson["password"];
+            
+            bool success = accountManager.connectGmail(userId, email, password);
+            
+            if (success) {
+                response = createJSONResponse(true, "Gmail account connected successfully");
+            } else {
+                response = createErrorResponse("Failed to connect Gmail account");
+            }
+        }
+        else if (method == "POST" && path == "/integration/connect/whatsapp") {
+            // Connect WhatsApp account
+            std::string userId = getAuthToken(headers);
+            if (userId.empty()) {
+                response = createErrorResponse("Unauthorized");
+                return;
+            }
+            
+            json requestJson = json::parse(body);
+            std::string phoneNumber = requestJson["phoneNumber"];
+            std::string password = requestJson["password"];
+            
+            bool success = accountManager.connectWhatsApp(userId, phoneNumber, password);
+            
+            if (success) {
+                response = createJSONResponse(true, "WhatsApp account connected successfully");
+            } else {
+                response = createErrorResponse("Failed to connect WhatsApp account");
+            }
+        }
+        else if (method == "GET" && path == "/integration/messages") {
+            // Get unified messages
+            std::string userId = getAuthToken(headers);
+            if (userId.empty()) {
+                response = createErrorResponse("Unauthorized");
+                return;
+            }
+            
+            auto messages = accountManager.fetchNewMessages(userId);
+            json messagesArray = json::array();
+            
+            for (const auto& message : messages) {
+                json messageJson;
+                messageJson["id"] = message.id;
+                messageJson["accountId"] = message.accountId;
+                messageJson["sender"] = message.sender;
+                messageJson["recipient"] = message.recipient;
+                messageJson["subject"] = message.subject;
+                messageJson["content"] = message.content;
+                messageJson["messageType"] = message.messageType;
+                messageJson["timestamp"] = std::chrono::duration_cast<std::chrono::seconds>(
+                    message.timestamp.time_since_epoch()).count();
+                messageJson["isRead"] = message.isRead;
+                messageJson["isImportant"] = message.isImportant;
+                messageJson["attachments"] = message.attachments;
+                
+                messagesArray.push_back(messageJson);
+            }
+            
+            response = createJSONResponse(true, "Messages retrieved successfully", messagesArray.dump());
+        }
+        else if (method == "POST" && path == "/integration/sync") {
+            // Manual sync trigger
+            std::string userId = getAuthToken(headers);
+            if (userId.empty()) {
+                response = createErrorResponse("Unauthorized");
+                return;
+            }
+            
+            json requestJson = json::parse(body);
+            std::string accountId = requestJson["accountId"];
+            
+            bool success = accountManager.syncAccount(userId, accountId);
+            
+            if (success) {
+                response = createJSONResponse(true, "Account synced successfully");
+            } else {
+                response = createErrorResponse("Failed to sync account");
+            }
+        }
+        else {
+            response = createErrorResponse("Method not allowed");
+        }
+    } catch (const std::exception& e) {
+        response = createErrorResponse("Internal server error: " + std::string(e.what()));
+    }
+}
+
+void Server::handleAuthRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+    response = createErrorResponse("Not implemented");
+}
+
+void Server::handleUserRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+    response = createErrorResponse("Not implemented");
+}
+
+void Server::handleMessageRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+    response = createErrorResponse("Not implemented");
+}
+
+void Server::handleGroupRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+    response = createErrorResponse("Not implemented");
 } 

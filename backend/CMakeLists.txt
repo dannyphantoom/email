@@ -8,6 +8,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(OpenSSL REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
+find_package(nlohmann_json 3.2.0 REQUIRED)
+find_package(CURL REQUIRED)
 
 # Include directories
 include_directories(${CMAKE_SOURCE_DIR}/src)
@@ -24,6 +26,7 @@ set(SOURCES
     src/encryption.cpp
     src/auth.cpp
     src/group_chat.cpp
+    src/account_integration.cpp
 )
 
 # Header files
@@ -36,6 +39,7 @@ set(HEADERS
     include/encryption.h
     include/auth.h
     include/group_chat.h
+    include/account_integration.h
 )
 
 # Create executable
@@ -47,6 +51,8 @@ target_link_libraries(cockpit_server
     OpenSSL::Crypto
     SQLite::SQLite3
     Threads::Threads
+    nlohmann_json::nlohmann_json
+    CURL::libcurl
     pthread
 )
 
