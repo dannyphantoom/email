@@ -2,6 +2,7 @@
 #include "message_handler.h"
 #include "user_manager.h"
 #include "server.h"
+#include "auth.h"
 #include <iostream>
 #include <sstream>
 #include <cstring>
@@ -10,6 +11,9 @@
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/buffer.h>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
 
 WebSocketHandler::WebSocketHandler(std::shared_ptr<MessageHandler> msgHandler, 
                                  std::shared_ptr<UserManager> userManager,
@@ -203,21 +207,68 @@ void WebSocketHandler::handleRegister(std::shared_ptr<WebSocketConnection> conn,
         
         std::string body = request.substr(bodyStart + 4);
         
-        // Simple JSON parsing (in production, use a proper JSON library)
-        // Expected format: {"username": "user@cockpit.com", "email": "user@cockpit.com", "password": "password"}
+        // Parse JSON
+        json requestData;
+        try {
+            requestData = json::parse(body);
+        } catch (const json::exception& e) {
+            sendErrorResponse(conn, 400, "Invalid JSON");
+            return;
+        }
         
-        // For now, just return a success response
-        std::string response = "HTTP/1.1 200 OK\r\n";
-        response += "Content-Type: application/json\r\n";
-        response += "Access-Control-Allow-Origin: *\r\n";
-        response += "Access-Control-Allow-Methods: POST, OPTIONS\r\n";
-        response += "Access-Control-Allow-Headers: Content-Type\r\n";
-        response += "Connection: close\r\n";
-        response += "\r\n";
-        response += "{\"success\": true, \"message\": \"User registered successfully\", \"token\": \"demo-token-123\"}";
+        // Extract fields
+        std::string username, email, password;
+        try {
+            username = requestData["username"];
+            email = requestData["email"];
+            password = requestData["password"];
+        } catch (const json::exception& e) {
+            sendErrorResponse(conn, 400, "Missing required fields");
+            return;
+        }
         
-        send(conn->socket, response.c_str(), response.length(), 0);
-        ::close(conn->socket);
+        // Validate input
+        if (username.empty() || email.empty() || password.empty()) {
+            sendErrorResponse(conn, 400, "All fields are required");
+            return;
+        }
+        
+        // Register user
+        if (userManager_->registerUser(username, email, password)) {
+            // Get the created user
+            User user = userManager_->getUserByUsername(username);
+            
+            // Generate session token
+            std::string token = userManager_->generateSessionToken(user.id);
+            
+            // Create response
+            json response = {
+                {"success", true},
+                {"message", "User registered successfully"},
+                {"token", token},
+                {"user", {
+                    {"id", user.id},
+                    {"username", user.username},
+                    {"email", user.email},
+                    {"created_at", user.created_at}
+                }}
+            };
+            
+            std::string responseStr = "HTTP/1.1 200 OK\r\n";
+            responseStr += "Content-Type: application/json\r\n";
+            responseStr += "Access-Control-Allow-Origin: *\r\n";
+            responseStr += "Access-Control-Allow-Methods: POST, OPTIONS\r\n";
+            responseStr += "Access-Control-Allow-Headers: Content-Type\r\n";
+            responseStr += "Connection: close\r\n";
+            responseStr += "\r\n";
+            responseStr += response.dump();
+            
+            send(conn->socket, responseStr.c_str(), responseStr.length(), 0);
+            ::close(conn->socket);
+        } else {
+            sendErrorResponse(conn, 400, "Registration failed - username or email may already exist");
+        }
+        
     } catch (const std::exception& e) {
         std::cerr << "Exception in handleRegister: " << e.what() << std::endl;
         sendErrorResponse(conn, 500, "Internal Server Error");
@@ -235,18 +286,70 @@ void WebSocketHandler::handleLogin(std::shared_ptr<WebSocketConnection> conn, co
         
         std::string body = request.substr(bodyStart + 4);
         
-        // For now, just return a success response
-        std::string response = "HTTP/1.1 200 OK\r\n";
-        response += "Content-Type: application/json\r\n";
-        response += "Access-Control-Allow-Origin: *\r\n";
-        response += "Access-Control-Allow-Methods: POST, OPTIONS\r\n";
-        response += "Access-Control-Allow-Headers: Content-Type\r\n";
-        response += "Connection: close\r\n";
-        response += "\r\n";
-        response += "{\"success\": true, \"message\": \"Login successful\", \"token\": \"demo-token-123\", \"user\": {\"id\": 1, \"username\": \"demo@cockpit.com\", \"email\": \"demo@cockpit.com\"}}";
+        // Parse JSON
+        json requestData;
+        try {
+            requestData = json::parse(body);
+        } catch (const json::exception& e) {
+            sendErrorResponse(conn, 400, "Invalid JSON");
+            return;
+        }
         
-        send(conn->socket, response.c_str(), response.length(), 0);
-        ::close(conn->socket);
+        // Extract fields
+        std::string username, password;
+        try {
+            username = requestData["username"];
+            password = requestData["password"];
+        } catch (const json::exception& e) {
+            sendErrorResponse(conn, 400, "Missing required fields");
+            return;
+        }
+        
+        // Validate input
+        if (username.empty() || password.empty()) {
+            sendErrorResponse(conn, 400, "Username and password are required");
+            return;
+        }
+        
+        // Authenticate user
+        if (userManager_->authenticateUser(username, password)) {
+            // Get the user
+            User user = userManager_->getUserByUsername(username);
+            
+            // Generate session token
+            std::string token = userManager_->generateSessionToken(user.id);
+            
+            // Update online status
+            userManager_->updateUserOnlineStatus(user.id, true);
+            
+            // Create response
+            json response = {
+                {"success", true},
+                {"message", "Login successful"},
+                {"token", token},
+                {"user", {
+                    {"id", user.id},
+                    {"username", user.username},
+                    {"email", user.email},
+                    {"created_at", user.created_at}
+                }}
+            };
+            
+            std::string responseStr = "HTTP/1.1 200 OK\r\n";
+            responseStr += "Content-Type: application/json\r\n";
+            responseStr += "Access-Control-Allow-Origin: *\r\n";
+            responseStr += "Access-Control-Allow-Methods: POST, OPTIONS\r\n";
+            responseStr += "Access-Control-Allow-Headers: Content-Type\r\n";
+            responseStr += "Connection: close\r\n";
+            responseStr += "\r\n";
+            responseStr += response.dump();
+            
+            send(conn->socket, responseStr.c_str(), responseStr.length(), 0);
+            ::close(conn->socket);
+        } else {
+            sendErrorResponse(conn, 401, "Invalid username or password");
+        }
+        
     } catch (const std::exception& e) {
         std::cerr << "Exception in handleLogin: " << e.what() << std::endl;
         sendErrorResponse(conn, 500, "Internal Server Error");

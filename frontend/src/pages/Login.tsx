@@ -27,7 +27,6 @@ const Login: React.FC = () => {
     setLoading(true);
 
     try {
-      // TODO: Replace with actual API call
       const response = await fetch('http://localhost:8080/api/auth/login', {
         method: 'POST',
         headers: {
@@ -38,7 +37,17 @@ const Login: React.FC = () => {
 
       if (response.ok) {
         const result = await response.json();
-        login(result.user, result.token);
+        
+        // Map the user data to match the frontend User interface
+        const user = {
+          id: result.user.id,
+          username: result.user.username,
+          email: result.user.email,
+          publicKey: '', // Will be generated later
+          createdAt: result.user.created_at,
+        };
+        
+        login(user, result.token);
         toast.success('Welcome back!');
         navigate('/messenger');
       } else {
@@ -137,13 +146,6 @@ const Login: React.FC = () => {
               </Link>
             </p>
           </div>
-        </div>
-
-        {/* Demo Credentials */}
-        <div className="mt-6 text-center">
-          <p className="text-xs text-dark-500">
-            Demo: username: demo, password: demo123
-          </p>
         </div>
       </div>
     </div>

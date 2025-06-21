@@ -227,6 +227,9 @@ bool Database::createUser(const std::string& username, const std::string& email,
     sqlite3_bind_text(stmt, 4, publicKey.c_str(), -1, SQLITE_STATIC);
     
     int rc = sqlite3_step(stmt);
+    if (rc != SQLITE_DONE) {
+        std::cerr << "Failed to insert user: " << sqlite3_errmsg(db_) << std::endl;
+    }
     sqlite3_finalize(stmt);
     
     return rc == SQLITE_DONE;
@@ -234,18 +237,14 @@ bool Database::createUser(const std::string& username, const std::string& email,
 
 User Database::getUserByUsername(const std::string& username) {
     std::lock_guard<std::mutex> lock(dbMutex_);
-    
     const char* sql = "SELECT id, username, email, password_hash, public_key, created_at, is_online FROM users WHERE username = ?";
     sqlite3_stmt* stmt;
-    
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
         return User{};
     }
-    
     sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_STATIC);
-    
-    User user;
+    User user{};
     if (sqlite3_step(stmt) == SQLITE_ROW) {
         user.id = sqlite3_column_int(stmt, 0);
         user.username = (const char*)sqlite3_column_text(stmt, 1);
@@ -254,8 +253,10 @@ User Database::getUserByUsername(const std::string& username) {
         user.public_key = (const char*)sqlite3_column_text(stmt, 4);
         user.created_at = (const char*)sqlite3_column_text(stmt, 5);
         user.is_online = sqlite3_column_int(stmt, 6) != 0;
+        std::cerr << "[DEBUG] getUserByUsername found: id=" << user.id << ", username='" << user.username << "'" << std::endl;
+    } else {
+        std::cerr << "[DEBUG] getUserByUsername: no user found for '" << username << "'" << std::endl;
     }
-    
     sqlite3_finalize(stmt);
     return user;
 }
@@ -467,7 +468,7 @@ bool Database::deleteMessage(int messageId) {
     return rc == SQLITE_DONE;
 }
 
-bool Database::createGroup(const std::string& name, const std::string& description, int creatorId) {
+int Database::createGroup(const std::string& name, const std::string& description, int creatorId) {
     std::lock_guard<std::mutex> lock(dbMutex_);
     
     const char* sql = "INSERT INTO groups (name, description, creator_id) VALUES (?, ?, ?)";
@@ -475,7 +476,7 @@ bool Database::createGroup(const std::string& name, const std::string& descripti
     
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
-        return false;
+        return -1;
     }
     
     sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_STATIC);
@@ -485,7 +486,11 @@ bool Database::createGroup(const std::string& name, const std::string& descripti
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     
-    return rc == SQLITE_DONE;
+    if (rc == SQLITE_DONE) {
+        return sqlite3_last_insert_rowid(db_);
+    } else {
+        return -1;
+    }
 }
 
 bool Database::addUserToGroup(int groupId, int userId, const std::string& role) {
@@ -560,7 +565,7 @@ std::vector<Group> Database::getUserGroups(int userId) {
 std::vector<User> Database::getGroupMembers(int groupId) {
     std::lock_guard<std::mutex> lock(dbMutex_);
     
-    const char* sql = "SELECT u.id, u.username, u.email, u.password_hash, u.public_key, u.created_at, u.is_online FROM users u JOIN group_members gm ON u.id = gm.user_id WHERE gm.group_id = ?";
+    const char* sql = "SELECT u.id, u.username, u.email, u.password_hash, u.public_key, u.created_at, u.is_online, gm.role FROM users u JOIN group_members gm ON u.id = gm.user_id WHERE gm.group_id = ?";
     sqlite3_stmt* stmt;
     
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
@@ -580,11 +585,41 @@ std::vector<User> Database::getGroupMembers(int groupId) {
         user.public_key = (const char*)sqlite3_column_text(stmt, 4);
         user.created_at = (const char*)sqlite3_column_text(stmt, 5);
         user.is_online = sqlite3_column_int(stmt, 6) != 0;
+        // Note: role is not part of User struct, so we'll need to handle it separately
         users.push_back(user);
     }
     
     sqlite3_finalize(stmt);
     return users;
+}
+
+std::vector<GroupMemberInfo> Database::getGroupMembersWithRole(int groupId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "SELECT u.id, u.username, u.email, gm.role, u.is_online, u.created_at FROM users u JOIN group_members gm ON u.id = gm.user_id WHERE gm.group_id = ?";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return {};
+    }
+    
+    sqlite3_bind_int(stmt, 1, groupId);
+    
+    std::vector<GroupMemberInfo> members;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        GroupMemberInfo member;
+        member.id = sqlite3_column_int(stmt, 0);
+        member.username = (const char*)sqlite3_column_text(stmt, 1);
+        member.email = (const char*)sqlite3_column_text(stmt, 2);
+        member.role = (const char*)sqlite3_column_text(stmt, 3);
+        member.is_online = sqlite3_column_int(stmt, 4) != 0;
+        member.created_at = (const char*)sqlite3_column_text(stmt, 5);
+        members.push_back(member);
+    }
+    
+    sqlite3_finalize(stmt);
+    return members;
 }
 
 bool Database::saveSession(const std::string& token, int userId, const std::string& expiresAt) {
@@ -999,4 +1034,30 @@ bool Database::restoreFromBackup(int backupId, int userId) {
     // TODO: Implement actual restoration logic based on backup_data format
     std::cout << "Restoring backup: " << backup.backup_name << std::endl;
     return true;
+}
+
+User Database::getUserByEmail(const std::string& email) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    const char* sql = "SELECT id, username, email, password_hash, public_key, created_at, is_online FROM users WHERE email = ?";
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return User{};
+    }
+    sqlite3_bind_text(stmt, 1, email.c_str(), -1, SQLITE_STATIC);
+    User user{};
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        user.id = sqlite3_column_int(stmt, 0);
+        user.username = (const char*)sqlite3_column_text(stmt, 1);
+        user.email = (const char*)sqlite3_column_text(stmt, 2);
+        user.password_hash = (const char*)sqlite3_column_text(stmt, 3);
+        user.public_key = (const char*)sqlite3_column_text(stmt, 4);
+        user.created_at = (const char*)sqlite3_column_text(stmt, 5);
+        user.is_online = sqlite3_column_int(stmt, 6) != 0;
+        std::cerr << "[DEBUG] getUserByEmail found: id=" << user.id << ", email='" << user.email << "'" << std::endl;
+    } else {
+        std::cerr << "[DEBUG] getUserByEmail: no user found for '" << email << "'" << std::endl;
+    }
+    sqlite3_finalize(stmt);
+    return user;
 } 

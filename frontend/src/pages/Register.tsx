@@ -48,13 +48,13 @@ const Register: React.FC = () => {
       if (response.ok) {
         const result = await response.json();
         
-        // Create a user object from the registration data since backend doesn't return it
+        // Use the actual user data returned from the backend
         const user = {
-          id: 1, // Temporary ID
-          username: data.username,
-          email: data.email,
+          id: result.user.id,
+          username: result.user.username,
+          email: result.user.email,
           publicKey: '', // Will be generated later
-          createdAt: new Date().toISOString(),
+          createdAt: result.user.created_at,
         };
         
         login(user, result.token);

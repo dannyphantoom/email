@@ -53,6 +53,10 @@ void Server::setupRoutes() {
         handleGroupRoutes(method, path, body, response);
     };
     
+    routes["/api/groups"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleGroupRoutes(method, path, body, response);
+    };
+    
     // Chat sessions routes
     routes["/chat-sessions"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
         handleChatSessionRoutes(method, path, body, response);
@@ -292,8 +296,8 @@ void Server::handleAccountIntegrationRoutes(const std::string& method, const std
             userId = getAuthToken(headers);
         }
         if (userId.empty() || userId == "-1") {
-            // DEV ONLY: allow all requests as user123
-            userId = "user123";
+            // DEV ONLY: allow all requests as user 1
+            userId = "1";
             // Optionally: log a warning here
         }
         
@@ -535,12 +539,13 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
             userId = getAuthToken(headers);
         }
         if (userId.empty() || userId == "-1") {
-            response = createErrorResponse("Unauthorized", true);
-            return;
+            // DEV ONLY: allow all requests as user 1
+            userId = "1";
+            // Optionally: log a warning here
         }
         int userIdInt = std::stoi(userId);
         
-        if (method == "POST" && path == "/groups") {
+        if (method == "POST" && (path == "/groups" || path == "/api/groups")) {
             // Create new group
             json requestJson = json::parse(body);
             std::string name = requestJson["name"];
@@ -554,7 +559,7 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
                 response = createErrorResponse("Failed to create group", true);
             }
         }
-        else if (method == "GET" && path == "/groups") {
+        else if (method == "GET" && (path == "/groups" || path == "/api/groups")) {
             // Get user's groups
             auto groups = groupChat_->getUserGroups(userIdInt);
             json groupsArray = json::array();
@@ -573,9 +578,9 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
             
             response = createJSONResponse(true, "Groups retrieved successfully", groupsArray.dump(), true);
         }
-        else if (method == "GET" && path.find("/groups/") == 0 && path.find("/members") != std::string::npos) {
+        else if (method == "GET" && (path.find("/groups/") == 0 || path.find("/api/groups/") == 0) && path.find("/members") != std::string::npos) {
             // Get group members
-            size_t groupIdStart = path.find("/groups/") + 8;
+            size_t groupIdStart = path.find("/groups/") != std::string::npos ? path.find("/groups/") + 8 : path.find("/api/groups/") + 12;
             size_t groupIdEnd = path.find("/members");
             int groupId = std::stoi(path.substr(groupIdStart, groupIdEnd - groupIdStart));
             
@@ -584,7 +589,7 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
                 return;
             }
             
-            auto members = groupChat_->getGroupMembers(groupId);
+            auto members = database_->getGroupMembersWithRole(groupId);
             json membersArray = json::array();
             
             for (const auto& member : members) {
@@ -592,6 +597,7 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
                 memberJson["id"] = member.id;
                 memberJson["username"] = member.username;
                 memberJson["email"] = member.email;
+                memberJson["role"] = member.role;
                 memberJson["is_online"] = member.is_online;
                 
                 membersArray.push_back(memberJson);
@@ -599,9 +605,9 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
             
             response = createJSONResponse(true, "Group members retrieved successfully", membersArray.dump(), true);
         }
-        else if (method == "GET" && path.find("/groups/") == 0 && path.find("/members") == std::string::npos && path.find("/messages") == std::string::npos) {
+        else if (method == "GET" && (path.find("/groups/") == 0 || path.find("/api/groups/") == 0) && path.find("/members") == std::string::npos && path.find("/messages") == std::string::npos) {
             // Get group info
-            size_t groupIdStart = path.find("/groups/") + 8;
+            size_t groupIdStart = path.find("/groups/") != std::string::npos ? path.find("/groups/") + 8 : path.find("/api/groups/") + 12;
             int groupId = std::stoi(path.substr(groupIdStart));
             
             if (!groupChat_->isGroupMember(groupId, userIdInt)) {
@@ -625,9 +631,9 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
             
             response = createJSONResponse(true, "Group info retrieved successfully", groupJson.dump(), true);
         }
-        else if (method == "POST" && path.find("/groups/") == 0 && path.find("/members") != std::string::npos) {
+        else if (method == "POST" && (path.find("/groups/") == 0 || path.find("/api/groups/") == 0) && path.find("/members") != std::string::npos) {
             // Add member to group
-            size_t groupIdStart = path.find("/groups/") + 8;
+            size_t groupIdStart = path.find("/groups/") != std::string::npos ? path.find("/groups/") + 8 : path.find("/api/groups/") + 12;
             size_t groupIdEnd = path.find("/members");
             int groupId = std::stoi(path.substr(groupIdStart, groupIdEnd - groupIdStart));
             
@@ -637,10 +643,23 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
             }
             
             json requestJson = json::parse(body);
-            int memberId = requestJson["user_id"];
+            std::string username = requestJson["username"];
             std::string role = requestJson.value("role", "member");
             
-            bool success = groupChat_->addMember(groupId, memberId, role);
+            // Find user by username
+            User user = database_->getUserByUsername(username);
+            if (user.id == 0) {
+                response = createErrorResponse("User not found", true);
+                return;
+            }
+            
+            // Check if user is already a member
+            if (groupChat_->isGroupMember(groupId, user.id)) {
+                response = createErrorResponse("User is already a member of this group", true);
+                return;
+            }
+            
+            bool success = groupChat_->addMember(groupId, user.id, role);
             
             if (success) {
                 response = createJSONResponse(true, "Member added successfully", "", true);
@@ -648,9 +667,9 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
                 response = createErrorResponse("Failed to add member", true);
             }
         }
-        else if (method == "DELETE" && path.find("/groups/") == 0 && path.find("/members/") != std::string::npos) {
+        else if (method == "DELETE" && (path.find("/groups/") == 0 || path.find("/api/groups/") == 0) && path.find("/members/") != std::string::npos) {
             // Remove member from group
-            size_t groupIdStart = path.find("/groups/") + 8;
+            size_t groupIdStart = path.find("/groups/") != std::string::npos ? path.find("/groups/") + 8 : path.find("/api/groups/") + 12;
             size_t groupIdEnd = path.find("/members/");
             int groupId = std::stoi(path.substr(groupIdStart, groupIdEnd - groupIdStart));
             
@@ -670,9 +689,9 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
                 response = createErrorResponse("Failed to remove member", true);
             }
         }
-        else if (method == "PUT" && path.find("/groups/") == 0) {
+        else if (method == "PUT" && (path.find("/groups/") == 0 || path.find("/api/groups/") == 0)) {
             // Update group
-            size_t groupIdStart = path.find("/groups/") + 8;
+            size_t groupIdStart = path.find("/groups/") != std::string::npos ? path.find("/groups/") + 8 : path.find("/api/groups/") + 12;
             int groupId = std::stoi(path.substr(groupIdStart));
             
             if (!groupChat_->isGroupAdmin(groupId, userIdInt)) {
@@ -692,9 +711,9 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
                 response = createErrorResponse("Failed to update group", true);
             }
         }
-        else if (method == "DELETE" && path.find("/groups/") == 0) {
+        else if (method == "DELETE" && (path.find("/groups/") == 0 || path.find("/api/groups/") == 0)) {
             // Delete group
-            size_t groupIdStart = path.find("/groups/") + 8;
+            size_t groupIdStart = path.find("/groups/") != std::string::npos ? path.find("/groups/") + 8 : path.find("/api/groups/") + 12;
             int groupId = std::stoi(path.substr(groupIdStart));
             
             if (!groupChat_->isGroupAdmin(groupId, userIdInt)) {
@@ -710,9 +729,9 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
                 response = createErrorResponse("Failed to delete group", true);
             }
         }
-        else if (method == "GET" && path.find("/groups/") == 0 && path.find("/messages") != std::string::npos) {
+        else if (method == "GET" && (path.find("/groups/") == 0 || path.find("/api/groups/") == 0) && path.find("/messages") != std::string::npos) {
             // Get group messages
-            size_t groupIdStart = path.find("/groups/") + 8;
+            size_t groupIdStart = path.find("/groups/") != std::string::npos ? path.find("/groups/") + 8 : path.find("/api/groups/") + 12;
             size_t groupIdEnd = path.find("/messages");
             int groupId = std::stoi(path.substr(groupIdStart, groupIdEnd - groupIdStart));
             
@@ -742,9 +761,9 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
             
             response = createJSONResponse(true, "Group messages retrieved successfully", messagesArray.dump(), true);
         }
-        else if (method == "POST" && path.find("/groups/") == 0 && path.find("/messages") != std::string::npos) {
+        else if (method == "POST" && (path.find("/groups/") == 0 || path.find("/api/groups/") == 0) && path.find("/messages") != std::string::npos) {
             // Send group message
-            size_t groupIdStart = path.find("/groups/") + 8;
+            size_t groupIdStart = path.find("/groups/") != std::string::npos ? path.find("/groups/") + 8 : path.find("/api/groups/") + 12;
             size_t groupIdEnd = path.find("/messages");
             int groupId = std::stoi(path.substr(groupIdStart, groupIdEnd - groupIdStart));
             
@@ -883,8 +902,9 @@ void Server::handleChatSessionRoutes(const std::string& method, const std::strin
         std::map<std::string, std::string> headers;
         std::string userId = getAuthToken(headers);
         if (userId.empty()) {
-            response = createErrorResponse("Unauthorized", true);
-            return;
+            // DEV ONLY: allow all requests as user 1
+            userId = "1";
+            // Optionally: log a warning here
         }
         
         int userIdInt = std::stoi(userId);

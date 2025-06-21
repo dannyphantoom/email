@@ -5,7 +5,16 @@ GroupChat::GroupChat(std::shared_ptr<Database> database) : database_(database) {
 }
 
 bool GroupChat::createGroup(const std::string& name, const std::string& description, int creatorId) {
-    return database_->createGroup(name, description, creatorId);
+    // Create the group and get its ID
+    int groupId = database_->createGroup(name, description, creatorId);
+    
+    if (groupId == -1) {
+        std::cerr << "Failed to create group" << std::endl;
+        return false;
+    }
+    
+    // Add the creator as an admin member of the group
+    return database_->addUserToGroup(groupId, creatorId, "admin");
 }
 
 bool GroupChat::deleteGroup(int groupId, int userId) {

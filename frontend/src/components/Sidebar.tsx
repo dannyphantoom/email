@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Plus, Users, MessageCircle } from 'lucide-react';
+import { Search, Plus, Users, MessageCircle, UserPlus, Settings, Trash2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import Modal from './Modal';
 
@@ -27,16 +27,21 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isGroupModalOpen, setGroupModalOpen] = useState(false);
   const [isNewChatModalOpen, setNewChatModalOpen] = useState(false);
+  const [isGroupInfoModalOpen, setGroupInfoModalOpen] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [groupDescription, setGroupDescription] = useState('');
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [newChatUser, setNewChatUser] = useState('');
   const [isStartingChat, setIsStartingChat] = useState(false);
+  const [selectedGroupInfo, setSelectedGroupInfo] = useState<any>(null);
+  const [groupMembers, setGroupMembers] = useState<any[]>([]);
+  const [inviteUsername, setInviteUsername] = useState('');
+  const [isInvitingUser, setIsInvitingUser] = useState(false);
 
   const fetchChatSessions = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await fetch('/api/chat-sessions', {
+      const response = await fetch('/chat-sessions', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -119,7 +124,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
       });
       if (response.ok) {
         toast.success('Group created successfully');
-        fetchGroups();
+        await fetchGroups(); // Refresh groups list
         setGroupModalOpen(false);
         setGroupName('');
         setGroupDescription('');
@@ -149,6 +154,134 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
     setIsStartingChat(false);
   };
 
+  const handleGroupClick = async (group: Chat) => {
+    onChatSelect(group.id);
+    try {
+      const groupId = group.id.replace('group-', '');
+      const response = await fetch(`/api/groups/${groupId}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setSelectedGroupInfo(data.data);
+        // Fetch group members
+        const membersResponse = await fetch(`/api/groups/${groupId}/members`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        if (membersResponse.ok) {
+          const membersData = await membersResponse.json();
+          setGroupMembers(membersData.data || []);
+        }
+        setGroupInfoModalOpen(true);
+      }
+    } catch (error) {
+      console.error('Failed to fetch group info:', error);
+    }
+  };
+
+  const handleInviteUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteUsername.trim()) return;
+    setIsInvitingUser(true);
+    try {
+      const groupId = selectedGroupInfo.id;
+      const response = await fetch(`/api/groups/${groupId}/members`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ username: inviteUsername })
+      });
+      
+      if (response.ok) {
+        toast.success(`Invited ${inviteUsername} to the group`);
+        setInviteUsername('');
+        
+        // Refresh group members
+        const membersResponse = await fetch(`/api/groups/${groupId}/members`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        
+        if (membersResponse.ok) {
+          const membersData = await membersResponse.json();
+          setGroupMembers(membersData.data || []);
+        }
+      } else {
+        const error = await response.json();
+        toast.error(error.message || 'Failed to invite user');
+      }
+    } catch (error) {
+      console.error('Failed to invite user:', error);
+      toast.error('Failed to invite user');
+    } finally {
+      setIsInvitingUser(false);
+    }
+  };
+
+  const handleRemoveMember = async (userId: number) => {
+    if (!confirm('Are you sure you want to remove this member?')) return;
+    
+    try {
+      const groupId = selectedGroupInfo.id;
+      const response = await fetch(`/api/groups/${groupId}/members/${userId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      if (response.ok) {
+        toast.success('Member removed from group');
+        
+        // Refresh group members
+        const membersResponse = await fetch(`/api/groups/${groupId}/members`, {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        
+        if (membersResponse.ok) {
+          const membersData = await membersResponse.json();
+          setGroupMembers(membersData.data || []);
+        }
+      } else {
+        toast.error('Failed to remove member');
+      }
+    } catch (error) {
+      console.error('Failed to remove member:', error);
+      toast.error('Failed to remove member');
+    }
+  };
+
+  const handleDeleteGroup = async () => {
+    if (!selectedGroupInfo) return;
+    if (!window.confirm('Are you sure you want to delete this group? This cannot be undone.')) return;
+    try {
+      const response = await fetch(`/api/groups/${selectedGroupInfo.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      if (response.ok) {
+        toast.success('Group deleted');
+        setGroupInfoModalOpen(false);
+        await fetchGroups();
+      } else {
+        toast.error('Failed to delete group');
+      }
+    } catch (error) {
+      toast.error('Failed to delete group');
+    }
+  };
+
   const getFilteredChats = () => {
     const currentChats = activeTab === 'chats' ? chats : groups;
     return currentChats.filter(chat =>
@@ -161,7 +294,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
   return (
     <div className="flex-1 flex flex-col">
       {/* Search Bar */}
-      <div className="p-4">
+      <div className="p-4 border-b border-dark-700">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-dark-400" />
           <input
@@ -169,7 +302,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
             placeholder="Search conversations..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="input-field pl-10 w-full text-sm"
+            className="input-field w-full pl-10"
           />
         </div>
       </div>
@@ -180,7 +313,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
           onClick={() => setActiveTab('chats')}
           className={`flex-1 py-3 px-4 text-sm font-medium transition-colors ${
             activeTab === 'chats'
-              ? 'text-cockpit-400 border-b-2 border-cockpit-400'
+              ? 'text-white border-b-2 border-cockpit-400'
               : 'text-dark-400 hover:text-white'
           }`}
         >
@@ -191,7 +324,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
           onClick={() => setActiveTab('groups')}
           className={`flex-1 py-3 px-4 text-sm font-medium transition-colors ${
             activeTab === 'groups'
-              ? 'text-cockpit-400 border-b-2 border-cockpit-400'
+              ? 'text-white border-b-2 border-cockpit-400'
               : 'text-dark-400 hover:text-white'
           }`}
         >
@@ -223,45 +356,55 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
             )}
           </div>
         ) : (
-          <div className="space-y-1 p-2">
+          <div className="p-2">
             {filteredChats.map((chat) => (
               <div
                 key={chat.id}
-                onClick={() => onChatSelect(chat.id)}
-                className={`sidebar-item ${
-                  selectedChat === chat.id ? 'sidebar-item-active' : ''
+                onClick={() => chat.isGroup ? handleGroupClick(chat) : onChatSelect(chat.id)}
+                className={`p-3 rounded-lg cursor-pointer transition-colors ${
+                  selectedChat === chat.id
+                    ? 'bg-cockpit-600/20 border border-cockpit-600/30'
+                    : 'hover:bg-dark-800'
                 }`}
               >
-                <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-r from-cockpit-600 to-purple-600 rounded-full flex items-center justify-center">
-                  {chat.isGroup ? (
-                    <Users className="w-5 h-5 text-white" />
-                  ) : (
-                    <span className="text-white font-medium text-sm">
-                      {chat.name.charAt(0).toUpperCase()}
-                    </span>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-gradient-to-r from-cockpit-600 to-purple-600 rounded-full flex items-center justify-center">
+                    {chat.isGroup ? (
+                      <Users className="w-5 h-5 text-white" />
+                    ) : (
+                      <span className="text-white font-medium text-sm">
+                        {chat.name.charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
                     <h3 className="text-sm font-medium text-white truncate">
                       {chat.name}
                     </h3>
-                    <span className="text-xs text-dark-400">{chat.timestamp}</span>
+                    <p className="text-xs text-dark-400 truncate">
+                      {chat.lastMessage}
+                    </p>
                   </div>
-                  <p className="text-xs text-dark-400 truncate">{chat.lastMessage}</p>
+                  <div className="text-right">
+                    <p className="text-xs text-dark-400">
+                      {chat.timestamp}
+                    </p>
+                    {chat.unreadCount > 0 && (
+                      <div className="mt-1 w-5 h-5 bg-cockpit-400 rounded-full flex items-center justify-center">
+                        <span className="text-xs text-white font-medium">
+                          {chat.unreadCount}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                {chat.unreadCount > 0 && (
-                  <div className="flex-shrink-0 w-5 h-5 bg-cockpit-500 text-white text-xs rounded-full flex items-center justify-center">
-                    {chat.unreadCount}
-                  </div>
-                )}
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* New Chat Button */}
+      {/* Bottom Action Button */}
       <div className="p-4 border-t border-dark-700">
         {activeTab === 'groups' ? (
           <button 
@@ -281,6 +424,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
           </button>
         )}
       </div>
+
       {/* Group Creation Modal */}
       <Modal isOpen={isGroupModalOpen} onClose={() => setGroupModalOpen(false)} title="Create Group">
         <form onSubmit={submitCreateGroup} className="space-y-4">
@@ -316,6 +460,95 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
           </div>
         </form>
       </Modal>
+
+      {/* Group Info Modal */}
+      <Modal isOpen={isGroupInfoModalOpen} onClose={() => setGroupInfoModalOpen(false)} title="Group Info">
+        {selectedGroupInfo && (
+          <div className="space-y-6">
+            {/* Group Info */}
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-lg font-semibold text-white">{selectedGroupInfo.name}</h3>
+                <p className="text-dark-400 text-sm">{selectedGroupInfo.description || 'No description'}</p>
+              </div>
+              
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-dark-400">Created:</span>
+                <span className="text-white">{new Date(selectedGroupInfo.created_at).toLocaleDateString()}</span>
+              </div>
+              
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-dark-400">Members:</span>
+                <span className="text-white">{groupMembers.length}</span>
+              </div>
+              {selectedGroupInfo.is_admin && (
+                <button
+                  onClick={handleDeleteGroup}
+                  className="btn-danger w-full mt-2 flex items-center justify-center space-x-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Delete Group</span>
+                </button>
+              )}
+            </div>
+
+            {/* Invite User */}
+            <div className="border-t border-dark-700 pt-4">
+              <h4 className="text-sm font-medium text-white mb-3">Invite User</h4>
+              <form onSubmit={handleInviteUser} className="space-y-3">
+                <input
+                  type="text"
+                  value={inviteUsername}
+                  onChange={(e) => setInviteUsername(e.target.value)}
+                  className="input-field w-full"
+                  placeholder="Enter username to invite"
+                  required
+                />
+                <button
+                  type="submit"
+                  disabled={isInvitingUser}
+                  className="btn-primary w-full flex items-center justify-center space-x-2"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>{isInvitingUser ? 'Inviting...' : 'Invite User'}</span>
+                </button>
+              </form>
+            </div>
+
+            {/* Group Members */}
+            <div className="border-t border-dark-700 pt-4">
+              <h4 className="text-sm font-medium text-white mb-3">Members</h4>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {groupMembers.map((member: any) => (
+                  <div key={member.id} className="flex items-center justify-between p-2 bg-dark-800 rounded">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-6 h-6 bg-gradient-to-r from-cockpit-600 to-purple-600 rounded-full flex items-center justify-center">
+                        <span className="text-white text-xs font-medium">
+                          {member.username.charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                      <span className="text-white text-sm">{member.username}</span>
+                      {member.role === 'admin' && (
+                        <span className="text-xs bg-cockpit-600 text-white px-2 py-1 rounded">Admin</span>
+                      )}
+                    </div>
+                    {selectedGroupInfo.is_admin && member.role !== 'admin' && (
+                      <button
+                        onClick={() => handleRemoveMember(member.id)}
+                        className="p-1 text-red-400 hover:text-red-300 transition-colors"
+                        title="Remove member"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       {/* New Conversation Modal */}
       <Modal isOpen={isNewChatModalOpen} onClose={() => setNewChatModalOpen(false)} title="Start New Conversation">
         <form onSubmit={submitNewConversation} className="space-y-4">

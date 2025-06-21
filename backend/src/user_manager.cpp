@@ -110,14 +110,13 @@ bool UserManager::isValidEmail(const std::string& email) {
 
 bool UserManager::isUsernameAvailable(const std::string& username) {
     User user = database_->getUserByUsername(username);
+    std::cerr << "[DEBUG] Checking username availability for: '" << username << "', found user id: " << user.id << std::endl;
     return user.id == 0; // User not found means username is available
 }
 
 bool UserManager::isEmailAvailable(const std::string& email) {
-    // TODO: Implement email availability check
-    // For now, assume all emails are available
-    (void)email; // Suppress unused parameter warning
-    return true;
+    User user = database_->getUserByEmail(email);
+    return user.id == 0;
 }
 
 std::string UserManager::hashPassword(const std::string& password) {

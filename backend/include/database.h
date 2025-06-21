@@ -43,6 +43,15 @@ struct GroupMember {
     std::string joined_at;
 };
 
+struct GroupMemberInfo {
+    int id;
+    std::string username;
+    std::string email;
+    std::string role; // "admin", "member"
+    bool is_online;
+    std::string created_at;
+};
+
 struct ChatBackup {
     int id;
     int user_id;
@@ -75,6 +84,7 @@ public:
     bool createUser(const std::string& username, const std::string& email, 
                    const std::string& passwordHash, const std::string& publicKey);
     User getUserByUsername(const std::string& username);
+    User getUserByEmail(const std::string& email);
     User getUserById(int id);
     bool updateUserOnlineStatus(int userId, bool online);
     std::vector<User> getAllUsers();
@@ -87,11 +97,12 @@ public:
     bool deleteMessage(int messageId);
 
     // Group operations
-    bool createGroup(const std::string& name, const std::string& description, int creatorId);
+    int createGroup(const std::string& name, const std::string& description, int creatorId);
     bool addUserToGroup(int groupId, int userId, const std::string& role = "member");
     bool removeUserFromGroup(int groupId, int userId);
     std::vector<Group> getUserGroups(int userId);
     std::vector<User> getGroupMembers(int groupId);
+    std::vector<GroupMemberInfo> getGroupMembersWithRole(int groupId);
     Group getGroupById(int groupId);
     bool updateGroup(int groupId, const std::string& name, const std::string& description);
     bool deleteGroup(int groupId);
