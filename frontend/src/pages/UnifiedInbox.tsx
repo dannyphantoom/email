@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import UnifiedMessageList from '../components/UnifiedMessageList';
 import { toast } from 'react-hot-toast';
+import { useAuthStore } from '../stores/authStore';
 
 interface UnifiedMessage {
   id: string;
@@ -42,6 +43,7 @@ interface ConnectedAccount {
 }
 
 const UnifiedInbox: React.FC = () => {
+  const { token } = useAuthStore();
   const [messages, setMessages] = useState<UnifiedMessage[]>([]);
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([]);
   const [selectedMessage, setSelectedMessage] = useState<UnifiedMessage | null>(null);
@@ -58,7 +60,7 @@ const UnifiedInbox: React.FC = () => {
       // Fetch unified messages
       const messagesRes = await fetch('/api/integration/messages', {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         }
       });
       let messagesData: UnifiedMessage[] = [];
@@ -71,7 +73,7 @@ const UnifiedInbox: React.FC = () => {
       // Fetch connected accounts
       const accountsRes = await fetch('/api/integration/accounts', {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         }
       });
       let accountsData: ConnectedAccount[] = [];

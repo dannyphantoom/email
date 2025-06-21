@@ -130,9 +130,5 @@ std::string MessageHandler::decryptMessage(const std::string& encryptedContent) 
 }
 
 bool MessageHandler::isUserInGroup(int userId, int groupId) {
-    // TODO: Implement group membership check
-    // For now, assume user is in group
-    (void)userId;   // Suppress unused parameter warning
-    (void)groupId;  // Suppress unused parameter warning
-    return true;
+    return database_->isGroupMember(groupId, userId);
 } 

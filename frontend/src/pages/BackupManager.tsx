@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Download, Upload, Trash2, Clock, FileText } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { useAuthStore } from '../stores/authStore';
 
 interface Backup {
   id: number;
@@ -11,6 +12,7 @@ interface Backup {
 }
 
 const BackupManager: React.FC = () => {
+  const { token } = useAuthStore();
   const [backups, setBackups] = useState<Backup[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedBackup, setSelectedBackup] = useState<Backup | null>(null);
@@ -24,7 +26,7 @@ const BackupManager: React.FC = () => {
     try {
       const response = await fetch('/api/backup', {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         }
       });
 
@@ -53,7 +55,7 @@ const BackupManager: React.FC = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           name,
@@ -86,7 +88,7 @@ const BackupManager: React.FC = () => {
       const response = await fetch(`/api/backup/${backup.id}/restore`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         }
       });
 
@@ -110,7 +112,7 @@ const BackupManager: React.FC = () => {
       const response = await fetch(`/api/backup/${backup.id}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         }
       });
 
@@ -130,7 +132,7 @@ const BackupManager: React.FC = () => {
     try {
       const response = await fetch(`/api/backup/${backup.id}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         }
       });
 

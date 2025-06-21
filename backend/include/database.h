@@ -26,6 +26,9 @@ struct Message {
     std::string timestamp;
     bool is_read;
     std::string message_type; // "text", "file", "image"
+    std::string file_name;    // For file messages
+    std::string file_path;    // For file messages
+    int file_size;           // For file messages
 };
 
 struct Group {

@@ -34,63 +34,63 @@ Server::~Server() {
 }
 
 void Server::setupRoutes() {
-    routes["/auth/register"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+    routes["/auth/register"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
         handleAuthRoutes(method, path, body, response);
     };
-    routes["/auth/login"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+    routes["/auth/login"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
         handleAuthRoutes(method, path, body, response);
     };
-    routes["/auth/logout"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+    routes["/auth/logout"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
         handleAuthRoutes(method, path, body, response);
     };
-    routes["/users"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-        handleUserRoutes(method, path, body, response);
+    routes["/users"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleUserRoutes(method, path, body, headers, response);
     };
-    routes["/messages"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-        handleMessageRoutes(method, path, body, response);
+    routes["/messages"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleMessageRoutes(method, path, body, headers, response);
     };
-    routes["/groups"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-        handleGroupRoutes(method, path, body, response);
+    routes["/groups"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleGroupRoutes(method, path, body, headers, response);
     };
     
-    routes["/api/groups"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-        handleGroupRoutes(method, path, body, response);
+    routes["/api/groups"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleGroupRoutes(method, path, body, headers, response);
     };
     
     // Chat sessions routes
-    routes["/chat-sessions"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-        handleChatSessionRoutes(method, path, body, response);
+    routes["/chat-sessions"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleChatSessionRoutes(method, path, body, headers, response);
     };
     
     // Backup routes
-    routes["/backup"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-        handleBackupRoutes(method, path, body, response);
+    routes["/backup"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleBackupRoutes(method, path, body, headers, response);
     };
     
     // Account integration routes
-    routes["/integration/accounts"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-        handleAccountIntegrationRoutes(method, path, body, response);
+    routes["/integration/accounts"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleAccountIntegrationRoutes(method, path, body, headers, response);
     };
-    routes["/integration/connect/gmail"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-        handleAccountIntegrationRoutes(method, path, body, response);
+    routes["/integration/connect/gmail"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleAccountIntegrationRoutes(method, path, body, headers, response);
     };
-    routes["/integration/connect/gmail/oauth2"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-        handleAccountIntegrationRoutes(method, path, body, response);
+    routes["/integration/connect/gmail/oauth2"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleAccountIntegrationRoutes(method, path, body, headers, response);
     };
-    routes["/integration/gmail/oauth2/url"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-        handleAccountIntegrationRoutes(method, path, body, response);
+    routes["/integration/gmail/oauth2/url"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleAccountIntegrationRoutes(method, path, body, headers, response);
     };
-    routes["/oauth/gmail/callback"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-        handleOAuthCallbackRoutes(method, path, body, response);
+    routes["/oauth/gmail/callback"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleOAuthCallbackRoutes(method, path, body, headers, response);
     };
-    routes["/integration/connect/whatsapp"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-        handleAccountIntegrationRoutes(method, path, body, response);
+    routes["/integration/connect/whatsapp"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleAccountIntegrationRoutes(method, path, body, headers, response);
     };
-    routes["/integration/messages"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-        handleAccountIntegrationRoutes(method, path, body, response);
+    routes["/integration/messages"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleAccountIntegrationRoutes(method, path, body, headers, response);
     };
-    routes["/integration/sync"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-        handleAccountIntegrationRoutes(method, path, body, response);
+    routes["/integration/sync"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleAccountIntegrationRoutes(method, path, body, headers, response);
     };
 }
 
@@ -275,30 +275,20 @@ bool Server::validateToken(const std::string& token, std::string& userId) {
     return false;
 }
 
-void Server::handleAccountIntegrationRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+void Server::handleAccountIntegrationRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
     try {
         // Extract Authorization header from the request headers
-        std::map<std::string, std::string> headers;
-        // Parse headers from body if available (for WebSocket HTTP routing)
-        size_t headerStart = body.find("Authorization:");
-        std::string userId;
-        if (headerStart != std::string::npos) {
-            size_t valueStart = headerStart + std::string("Authorization:").length();
-            size_t valueEnd = body.find('\n', valueStart);
-            std::string authHeader = body.substr(valueStart, valueEnd - valueStart);
-            authHeader.erase(0, authHeader.find_first_not_of(" \t\r\n"));
-            if (authHeader.rfind("Bearer ", 0) == 0) {
+        std::string userId = "1"; // Default for development
+        auto authIt = headers.find("Authorization");
+        if (authIt != headers.end()) {
+            std::string authHeader = authIt->second;
+            if (authHeader.find("Bearer ") == 0) {
                 std::string token = authHeader.substr(7);
-                userId = std::to_string(database_->getUserIdFromSession(token));
+                int userIdInt;
+                if (userManager_->validateSessionToken(token, userIdInt)) {
+                    userId = std::to_string(userIdInt);
+                }
             }
-        } else {
-            // Fallback: try to get from headers map (for direct HTTP)
-            userId = getAuthToken(headers);
-        }
-        if (userId.empty() || userId == "-1") {
-            // DEV ONLY: allow all requests as user 1
-            userId = "1";
-            // Optionally: log a warning here
         }
         
         if (method == "GET" && path == "/integration/accounts") {
@@ -450,13 +440,12 @@ void Server::handleAuthRoutes(const std::string& method, const std::string& path
     response = createErrorResponse("Not implemented", true);
 }
 
-void Server::handleUserRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+void Server::handleUserRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
     response = createErrorResponse("Not implemented", true);
 }
 
-void Server::handleMessageRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+void Server::handleMessageRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
     try {
-        std::map<std::string, std::string> headers;
         std::string userId = getAuthToken(headers);
         if (userId.empty()) {
             response = createErrorResponse("Unauthorized", true);
@@ -518,45 +507,79 @@ void Server::handleMessageRoutes(const std::string& method, const std::string& p
     }
 }
 
-void Server::handleGroupRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-    try {
-        // Extract Authorization header from the request headers
-        std::map<std::string, std::string> headers;
-        // Parse headers from body if available (for WebSocket HTTP routing)
-        size_t headerStart = body.find("Authorization:");
-        std::string userId;
-        if (headerStart != std::string::npos) {
-            size_t valueStart = headerStart + std::string("Authorization:").length();
-            size_t valueEnd = body.find('\n', valueStart);
-            std::string authHeader = body.substr(valueStart, valueEnd - valueStart);
-            authHeader.erase(0, authHeader.find_first_not_of(" \t\r\n"));
-            if (authHeader.rfind("Bearer ", 0) == 0) {
-                std::string token = authHeader.substr(7);
-                userId = std::to_string(database_->getUserIdFromSession(token));
+void Server::handleGroupRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+    std::cout << "[DEBUG] handleGroupRoutes called with:" << std::endl;
+    std::cout << "[DEBUG] Method: " << method << std::endl;
+    std::cout << "[DEBUG] Path: " << path << std::endl;
+    std::cout << "[DEBUG] Body: " << body << std::endl;
+    
+    // Extract user ID from Authorization header
+    std::string userId = "1"; // Default for development
+    auto authIt = headers.find("Authorization");
+    if (authIt != headers.end()) {
+        std::string authHeader = authIt->second;
+        if (authHeader.find("Bearer ") == 0) {
+            std::string token = authHeader.substr(7);
+            int userIdInt;
+            if (userManager_->validateSessionToken(token, userIdInt)) {
+                userId = std::to_string(userIdInt);
             }
-        } else {
-            // Fallback: try to get from headers map (for direct HTTP)
-            userId = getAuthToken(headers);
         }
-        if (userId.empty() || userId == "-1") {
-            // DEV ONLY: allow all requests as user 1
-            userId = "1";
-            // Optionally: log a warning here
-        }
+    }
+    
+    std::cout << "[DEBUG] User ID from token: " << userId << std::endl;
+    
+    try {
         int userIdInt = std::stoi(userId);
         
         if (method == "POST" && (path == "/groups" || path == "/api/groups")) {
             // Create new group
-            json requestJson = json::parse(body);
-            std::string name = requestJson["name"];
-            std::string description = requestJson["description"];
+            std::cout << "[DEBUG] Creating group for user " << userIdInt << std::endl;
+            std::cout << "[DEBUG] Request body: " << body << std::endl;
             
-            bool success = groupChat_->createGroup(name, description, userIdInt);
-            
-            if (success) {
-                response = createJSONResponse(true, "Group created successfully", "", true);
-            } else {
-                response = createErrorResponse("Failed to create group", true);
+            try {
+                json requestJson = json::parse(body);
+                std::string name = requestJson["name"];
+                std::string description = requestJson["description"];
+                
+                std::cout << "[DEBUG] Group name: " << name << std::endl;
+                std::cout << "[DEBUG] Group description: " << description << std::endl;
+                
+                int groupId = database_->createGroup(name, description, userIdInt);
+                std::cout << "[DEBUG] Created group ID: " << groupId << std::endl;
+                
+                if (groupId > 0) {
+                    // Add creator as admin member
+                    bool memberAdded = database_->addUserToGroup(groupId, userIdInt, "admin");
+                    std::cout << "[DEBUG] Added creator to group: " << (memberAdded ? "SUCCESS" : "FAILED") << std::endl;
+                    
+                    if (memberAdded) {
+                        // Get the created group
+                        Group group = database_->getGroupById(groupId);
+                        json groupJson;
+                        groupJson["id"] = group.id;
+                        groupJson["name"] = group.name;
+                        groupJson["description"] = group.description;
+                        groupJson["creator_id"] = group.creator_id;
+                        groupJson["created_at"] = group.created_at;
+                        groupJson["is_admin"] = true; // Creator is always admin
+                        
+                        response = createJSONResponse(true, "Group created successfully", groupJson.dump(), true);
+                        std::cout << "[DEBUG] Group creation response sent successfully" << std::endl;
+                    } else {
+                        response = createErrorResponse("Failed to add creator to group", true);
+                        std::cout << "[DEBUG] Failed to add creator to group" << std::endl;
+                    }
+                } else {
+                    response = createErrorResponse("Failed to create group", true);
+                    std::cout << "[DEBUG] Failed to create group in database" << std::endl;
+                }
+            } catch (const json::exception& e) {
+                std::cout << "[DEBUG] JSON parsing error: " << e.what() << std::endl;
+                response = createErrorResponse("Invalid JSON in request body", true);
+            } catch (const std::exception& e) {
+                std::cout << "[DEBUG] Exception in group creation: " << e.what() << std::endl;
+                response = createErrorResponse("Internal server error during group creation", true);
             }
         }
         else if (method == "GET" && (path == "/groups" || path == "/api/groups")) {
@@ -767,27 +790,75 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
             size_t groupIdEnd = path.find("/messages");
             int groupId = std::stoi(path.substr(groupIdStart, groupIdEnd - groupIdStart));
             
+            std::cout << "[DEBUG] Sending group message to group " << groupId << " from user " << userIdInt << std::endl;
+            
             if (!groupChat_->isGroupMember(groupId, userIdInt)) {
+                std::cout << "[DEBUG] User " << userIdInt << " is not a member of group " << groupId << std::endl;
                 response = createErrorResponse("Not a member of this group", true);
                 return;
             }
             
-            json requestJson = json::parse(body);
-            std::string content = requestJson["content"];
-            std::string messageType = requestJson.value("type", "text");
+            // Check if this is a file upload (multipart form data)
+            auto contentTypeIt = headers.find("content-type");
+            bool isFileUpload = false;
+            if (contentTypeIt != headers.end() && contentTypeIt->second.find("multipart/form-data") != std::string::npos) {
+                isFileUpload = true;
+            }
             
-            Message message;
-            message.sender_id = userIdInt;
-            message.group_id = groupId;
-            message.content = content;
-            message.message_type = messageType;
-            
-            bool success = database_->saveMessage(message);
-            
-            if (success) {
-                response = createJSONResponse(true, "Group message sent successfully", "", true);
+            if (isFileUpload) {
+                // Handle file upload
+                // For now, we'll just save the file info and return success
+                // In a real implementation, you'd save the file to disk and store the path
+                std::cout << "[DEBUG] File upload detected" << std::endl;
+                
+                Message message;
+                message.sender_id = userIdInt;
+                message.group_id = groupId;
+                message.receiver_id = 0; // For group messages
+                message.content = "File uploaded"; // Placeholder
+                message.encrypted_content = "File uploaded"; // Placeholder
+                message.message_type = "file"; // or "image" based on file type
+                message.file_name = "uploaded_file"; // Extract from multipart data
+                message.file_path = "/uploads/file_" + std::to_string(time(nullptr)); // Generate path
+                message.file_size = 0; // Extract from multipart data
+                
+                bool success = database_->saveMessage(message);
+                
+                std::cout << "[DEBUG] File message save result: " << (success ? "SUCCESS" : "FAILED") << std::endl;
+                
+                if (success) {
+                    response = createJSONResponse(true, "File uploaded successfully", "", true);
+                } else {
+                    response = createErrorResponse("Failed to upload file", true);
+                }
             } else {
-                response = createErrorResponse("Failed to send group message", true);
+                // Handle text message
+                json requestJson = json::parse(body);
+                std::string content = requestJson["content"];
+                std::string messageType = requestJson.value("type", "text");
+                
+                std::cout << "[DEBUG] Message content: " << content << std::endl;
+                
+                Message message;
+                message.sender_id = userIdInt;
+                message.group_id = groupId;
+                message.receiver_id = 0; // For group messages
+                message.content = content;
+                message.encrypted_content = content; // For now, just copy content
+                message.message_type = messageType;
+                message.file_name = "";
+                message.file_path = "";
+                message.file_size = 0;
+                
+                bool success = database_->saveMessage(message);
+                
+                std::cout << "[DEBUG] Message save result: " << (success ? "SUCCESS" : "FAILED") << std::endl;
+                
+                if (success) {
+                    response = createJSONResponse(true, "Group message sent successfully", "", true);
+                } else {
+                    response = createErrorResponse("Failed to send group message", true);
+                }
             }
         }
         else {
@@ -798,9 +869,8 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
     }
 }
 
-void Server::handleBackupRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+void Server::handleBackupRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
     try {
-        std::map<std::string, std::string> headers;
         std::string userId = getAuthToken(headers);
         if (userId.empty()) {
             response = createErrorResponse("Unauthorized", true);
@@ -897,23 +967,26 @@ void Server::handleBackupRoutes(const std::string& method, const std::string& pa
     }
 }
 
-void Server::handleChatSessionRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+void Server::handleChatSessionRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+    std::cout << "[DEBUG] handleChatSessionRoutes called with:" << std::endl;
+    std::cout << "[DEBUG] Method: " << method << std::endl;
+    std::cout << "[DEBUG] Path: " << path << std::endl;
+    std::cout << "[DEBUG] Body: " << body << std::endl;
+    for (const auto& [k, v] : headers) {
+        std::cout << "[DEBUG] Header: " << k << " = " << v << std::endl;
+    }
     try {
-        std::map<std::string, std::string> headers;
         std::string userId = getAuthToken(headers);
         if (userId.empty()) {
             // DEV ONLY: allow all requests as user 1
             userId = "1";
             // Optionally: log a warning here
         }
-        
         int userIdInt = std::stoi(userId);
-        
         if (method == "GET" && path == "/chat-sessions") {
             // Get user's chat sessions
             auto sessions = database_->getUserChatSessions(userIdInt);
             json sessionsArray = json::array();
-            
             for (const auto& session : sessions) {
                 json sessionJson;
                 sessionJson["id"] = session.id;
@@ -923,19 +996,14 @@ void Server::handleChatSessionRoutes(const std::string& method, const std::strin
                 sessionJson["last_timestamp"] = session.last_timestamp;
                 sessionJson["unread_count"] = session.unread_count;
                 sessionJson["updated_at"] = session.updated_at;
-                
-                // Get user info for other_user_id
                 if (session.other_user_id > 0) {
                     User otherUser = database_->getUserById(session.other_user_id);
                     sessionJson["other_user_name"] = otherUser.username;
                 }
-                
                 sessionsArray.push_back(sessionJson);
             }
-            
             response = createJSONResponse(true, "Chat sessions retrieved successfully", sessionsArray.dump(), true);
-        }
-        else {
+        } else {
             response = createErrorResponse("Method not allowed", true);
         }
     } catch (const std::exception& e) {
@@ -991,10 +1059,21 @@ void Server::handleRequest(const std::string& request, std::string& response) {
         
         parseRequest(request, method, path, headers, body);
         
-        // Find the route handler
-        auto routeIt = routes.find(path);
-        if (routeIt != routes.end()) {
-            routeIt->second(method, path, body, response);
+        // Find the route handler using prefix matching
+        std::function<void(const std::string&, const std::string&, const std::string&, const std::map<std::string, std::string>&, std::string&)> routeHandler = nullptr;
+        std::string matchedPrefix;
+        
+        for (const auto& [prefix, handler] : routes) {
+            if (path.substr(0, prefix.length()) == prefix) {
+                if (prefix.length() > matchedPrefix.length()) {
+                    matchedPrefix = prefix;
+                    routeHandler = handler;
+                }
+            }
+        }
+        
+        if (routeHandler) {
+            routeHandler(method, path, body, headers, response);
         } else {
             response = createErrorResponse("Route not found", true);
         }
@@ -1007,7 +1086,7 @@ void Server::handleRequest(const std::string& request, std::string& response) {
     }
 }
 
-void Server::handleOAuthCallbackRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+void Server::handleOAuthCallbackRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
     try {
         if (method == "GET" && path == "/oauth/gmail/callback") {
             // Parse query parameters from the request

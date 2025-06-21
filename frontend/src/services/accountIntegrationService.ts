@@ -61,7 +61,9 @@ export interface ConnectTelegramBotRequest {
 
 class AccountIntegrationService {
   private getAuthHeaders(): HeadersInit {
-    const token = localStorage.getItem('authToken');
+    // Get token from localStorage since this service doesn't have access to the auth store
+    const token = localStorage.getItem('cockpit-auth') ? 
+      JSON.parse(localStorage.getItem('cockpit-auth')!).token : null;
     return {
       'Content-Type': 'application/json',
       ...(token && { 'Authorization': `Bearer ${token}` })

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Plus, Users, MessageCircle, UserPlus, Settings, Trash2 } from 'lucide-react';
+import { Search, Plus, Users, MessageCircle, UserPlus, Settings, Trash2, LogOut } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { useAuthStore } from '../stores/authStore';
 import Modal from './Modal';
 
 interface Chat {
@@ -20,6 +21,7 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
+  const { token } = useAuthStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'chats' | 'groups'>('chats');
   const [chats, setChats] = useState<Chat[]>([]);
@@ -39,11 +41,10 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
   const [isInvitingUser, setIsInvitingUser] = useState(false);
 
   const fetchChatSessions = useCallback(async () => {
-    setIsLoading(true);
     try {
       const response = await fetch('/chat-sessions', {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         }
       });
       
@@ -65,16 +66,14 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
     } catch (error) {
       console.error('Failed to fetch chat sessions:', error);
       toast.error('Failed to load chat sessions');
-    } finally {
-      setIsLoading(false);
     }
-  }, []);
+  }, [token]);
 
   const fetchGroups = useCallback(async () => {
     try {
       const response = await fetch('/api/groups', {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         }
       });
       
@@ -91,18 +90,29 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
         }));
         setGroups(groupChats);
       } else {
+        console.error('Failed to load groups:', response.status, response.statusText);
         toast.error('Failed to load groups');
       }
     } catch (error) {
       console.error('Failed to fetch groups:', error);
       toast.error('Failed to load groups');
     }
-  }, []);
+  }, [token]);
 
   // Fetch chat sessions and groups
   useEffect(() => {
-    fetchChatSessions();
-    fetchGroups();
+    const loadData = async () => {
+      setIsLoading(true);
+      try {
+        await Promise.all([fetchChatSessions(), fetchGroups()]);
+      } catch (error) {
+        console.error('Failed to load data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadData();
   }, [fetchChatSessions, fetchGroups]);
 
   const handleCreateGroup = async () => {
@@ -118,7 +128,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({ name: groupName, description: groupDescription })
       });
@@ -156,31 +166,6 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
 
   const handleGroupClick = async (group: Chat) => {
     onChatSelect(group.id);
-    try {
-      const groupId = group.id.replace('group-', '');
-      const response = await fetch(`/api/groups/${groupId}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setSelectedGroupInfo(data.data);
-        // Fetch group members
-        const membersResponse = await fetch(`/api/groups/${groupId}/members`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
-        });
-        if (membersResponse.ok) {
-          const membersData = await membersResponse.json();
-          setGroupMembers(membersData.data || []);
-        }
-        setGroupInfoModalOpen(true);
-      }
-    } catch (error) {
-      console.error('Failed to fetch group info:', error);
-    }
   };
 
   const handleInviteUser = async (e: React.FormEvent) => {
@@ -193,7 +178,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({ username: inviteUsername })
       });
@@ -205,7 +190,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
         // Refresh group members
         const membersResponse = await fetch(`/api/groups/${groupId}/members`, {
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
+            'Authorization': `Bearer ${token}`
           }
         });
         
@@ -233,7 +218,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
       const response = await fetch(`/api/groups/${groupId}/members/${userId}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         }
       });
       
@@ -243,7 +228,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
         // Refresh group members
         const membersResponse = await fetch(`/api/groups/${groupId}/members`, {
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
+            'Authorization': `Bearer ${token}`
           }
         });
         
@@ -267,7 +252,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
       const response = await fetch(`/api/groups/${selectedGroupInfo.id}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         }
       });
       if (response.ok) {

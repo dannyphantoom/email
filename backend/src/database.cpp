@@ -75,6 +75,9 @@ bool Database::createTables() {
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             is_read BOOLEAN DEFAULT FALSE,
             message_type TEXT DEFAULT 'text',
+            file_name TEXT,
+            file_path TEXT,
+            file_size INTEGER,
             FOREIGN KEY (sender_id) REFERENCES users (id),
             FOREIGN KEY (receiver_id) REFERENCES users (id),
             FOREIGN KEY (group_id) REFERENCES groups (id)
@@ -340,11 +343,54 @@ std::vector<User> Database::getAllUsers() {
 bool Database::saveMessage(const Message& message) {
     std::lock_guard<std::mutex> lock(dbMutex_);
     
-    const char* sql = "INSERT INTO messages (sender_id, receiver_id, group_id, content, encrypted_content, message_type) VALUES (?, ?, ?, ?, ?, ?)";
+    std::cout << "[DEBUG] saveMessage called with:" << std::endl;
+    std::cout << "  sender_id: " << message.sender_id << std::endl;
+    std::cout << "  receiver_id: " << message.receiver_id << std::endl;
+    std::cout << "  group_id: " << message.group_id << std::endl;
+    std::cout << "  content: " << message.content << std::endl;
+    std::cout << "  encrypted_content: " << message.encrypted_content << std::endl;
+    std::cout << "  message_type: " << message.message_type << std::endl;
+    
+    // Validate sender exists
+    User sender = getUserById(message.sender_id);
+    if (sender.id == 0) {
+        std::cerr << "[DEBUG] Sender with ID " << message.sender_id << " does not exist" << std::endl;
+        return false;
+    }
+    std::cout << "[DEBUG] Sender validation passed: " << sender.username << std::endl;
+    
+    // Validate group exists if it's a group message
+    if (message.group_id > 0) {
+        Group group = getGroupById(message.group_id);
+        if (group.id == 0) {
+            std::cerr << "[DEBUG] Group with ID " << message.group_id << " does not exist" << std::endl;
+            return false;
+        }
+        std::cout << "[DEBUG] Group validation passed: " << group.name << std::endl;
+        
+        // Check if sender is a member of the group
+        if (!isGroupMember(message.group_id, message.sender_id)) {
+            std::cerr << "[DEBUG] User " << message.sender_id << " is not a member of group " << message.group_id << std::endl;
+            return false;
+        }
+        std::cout << "[DEBUG] Group membership validation passed" << std::endl;
+    }
+    
+    // Validate receiver exists if it's a direct message
+    if (message.receiver_id > 0) {
+        User receiver = getUserById(message.receiver_id);
+        if (receiver.id == 0) {
+            std::cerr << "[DEBUG] Receiver with ID " << message.receiver_id << " does not exist" << std::endl;
+            return false;
+        }
+        std::cout << "[DEBUG] Receiver validation passed: " << receiver.username << std::endl;
+    }
+    
+    const char* sql = "INSERT INTO messages (sender_id, receiver_id, group_id, content, encrypted_content, message_type, file_name, file_path, file_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
     sqlite3_stmt* stmt;
     
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        std::cerr << "[DEBUG] Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
         return false;
     }
     
@@ -354,17 +400,25 @@ bool Database::saveMessage(const Message& message) {
     sqlite3_bind_text(stmt, 4, message.content.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 5, message.encrypted_content.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 6, message.message_type.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 7, message.file_name.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 8, message.file_path.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 9, message.file_size);
     
     int rc = sqlite3_step(stmt);
+    if (rc != SQLITE_DONE) {
+        std::cerr << "[DEBUG] sqlite3_step failed with code " << rc << ": " << sqlite3_errmsg(db_) << std::endl;
+    }
     sqlite3_finalize(stmt);
     
-    return rc == SQLITE_DONE;
+    bool success = (rc == SQLITE_DONE);
+    std::cout << "[DEBUG] saveMessage result: " << (success ? "SUCCESS" : "FAILED") << std::endl;
+    return success;
 }
 
 std::vector<Message> Database::getMessages(int userId, int otherUserId, int limit) {
     std::lock_guard<std::mutex> lock(dbMutex_);
     
-    const char* sql = "SELECT id, sender_id, receiver_id, group_id, content, encrypted_content, timestamp, is_read, message_type FROM messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?) ORDER BY timestamp DESC LIMIT ?";
+    const char* sql = "SELECT id, sender_id, receiver_id, group_id, content, encrypted_content, timestamp, is_read, message_type FROM messages WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?) ORDER BY timestamp ASC LIMIT ?";
     sqlite3_stmt* stmt;
     
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
@@ -400,7 +454,7 @@ std::vector<Message> Database::getMessages(int userId, int otherUserId, int limi
 std::vector<Message> Database::getGroupMessages(int groupId, int limit) {
     std::lock_guard<std::mutex> lock(dbMutex_);
     
-    const char* sql = "SELECT id, sender_id, receiver_id, group_id, content, encrypted_content, timestamp, is_read, message_type FROM messages WHERE group_id = ? ORDER BY timestamp DESC LIMIT ?";
+    const char* sql = "SELECT id, sender_id, receiver_id, group_id, content, encrypted_content, timestamp, is_read, message_type, file_name, file_path, file_size FROM messages WHERE group_id = ? ORDER BY timestamp ASC LIMIT ?";
     sqlite3_stmt* stmt;
     
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
@@ -423,6 +477,9 @@ std::vector<Message> Database::getGroupMessages(int groupId, int limit) {
         message.timestamp = (const char*)sqlite3_column_text(stmt, 6);
         message.is_read = sqlite3_column_int(stmt, 7) != 0;
         message.message_type = (const char*)sqlite3_column_text(stmt, 8);
+        message.file_name = sqlite3_column_text(stmt, 9) ? (const char*)sqlite3_column_text(stmt, 9) : "";
+        message.file_path = sqlite3_column_text(stmt, 10) ? (const char*)sqlite3_column_text(stmt, 10) : "";
+        message.file_size = sqlite3_column_int(stmt, 11);
         messages.push_back(message);
     }
     
@@ -745,20 +802,79 @@ bool Database::updateGroup(int groupId, const std::string& name, const std::stri
 bool Database::deleteGroup(int groupId) {
     std::lock_guard<std::mutex> lock(dbMutex_);
     
-    const char* sql = "DELETE FROM groups WHERE id = ?";
-    sqlite3_stmt* stmt;
+    // Start a transaction
+    sqlite3_exec(db_, "BEGIN TRANSACTION", nullptr, nullptr, nullptr);
     
-    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+    try {
+        // Delete group messages
+        const char* deleteMessagesSql = "DELETE FROM messages WHERE group_id = ?";
+        sqlite3_stmt* messagesStmt;
+        
+        if (sqlite3_prepare_v2(db_, deleteMessagesSql, -1, &messagesStmt, nullptr) != SQLITE_OK) {
+            std::cerr << "Failed to prepare delete messages statement: " << sqlite3_errmsg(db_) << std::endl;
+            sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+            return false;
+        }
+        
+        sqlite3_bind_int(messagesStmt, 1, groupId);
+        int messagesRc = sqlite3_step(messagesStmt);
+        sqlite3_finalize(messagesStmt);
+        
+        if (messagesRc != SQLITE_DONE) {
+            std::cerr << "Failed to delete group messages" << std::endl;
+            sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+            return false;
+        }
+        
+        // Delete group members
+        const char* deleteMembersSql = "DELETE FROM group_members WHERE group_id = ?";
+        sqlite3_stmt* membersStmt;
+        
+        if (sqlite3_prepare_v2(db_, deleteMembersSql, -1, &membersStmt, nullptr) != SQLITE_OK) {
+            std::cerr << "Failed to prepare delete members statement: " << sqlite3_errmsg(db_) << std::endl;
+            sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+            return false;
+        }
+        
+        sqlite3_bind_int(membersStmt, 1, groupId);
+        int membersRc = sqlite3_step(membersStmt);
+        sqlite3_finalize(membersStmt);
+        
+        if (membersRc != SQLITE_DONE) {
+            std::cerr << "Failed to delete group members" << std::endl;
+            sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+            return false;
+        }
+        
+        // Delete the group itself
+        const char* deleteGroupSql = "DELETE FROM groups WHERE id = ?";
+        sqlite3_stmt* groupStmt;
+        
+        if (sqlite3_prepare_v2(db_, deleteGroupSql, -1, &groupStmt, nullptr) != SQLITE_OK) {
+            std::cerr << "Failed to prepare delete group statement: " << sqlite3_errmsg(db_) << std::endl;
+            sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+            return false;
+        }
+        
+        sqlite3_bind_int(groupStmt, 1, groupId);
+        int groupRc = sqlite3_step(groupStmt);
+        sqlite3_finalize(groupStmt);
+        
+        if (groupRc != SQLITE_DONE) {
+            std::cerr << "Failed to delete group" << std::endl;
+            sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+            return false;
+        }
+        
+        // Commit the transaction
+        sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
+        return true;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Exception in deleteGroup: " << e.what() << std::endl;
+        sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
         return false;
     }
-    
-    sqlite3_bind_int(stmt, 1, groupId);
-    
-    int rc = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-    
-    return rc == SQLITE_DONE;
 }
 
 bool Database::isGroupMember(int groupId, int userId) {

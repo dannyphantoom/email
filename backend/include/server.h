@@ -40,13 +40,13 @@ public:
     
     // Route handlers
     void handleAuthRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
-    void handleUserRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
-    void handleMessageRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
-    void handleChatSessionRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
-    void handleGroupRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
-    void handleBackupRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
-    void handleAccountIntegrationRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
-    void handleOAuthCallbackRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
+    void handleUserRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response);
+    void handleMessageRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response);
+    void handleChatSessionRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response);
+    void handleGroupRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response);
+    void handleBackupRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response);
+    void handleAccountIntegrationRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response);
+    void handleOAuthCallbackRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response);
     
     // CORS and utility functions
     void addCORSHeaders(std::string& response);
@@ -77,7 +77,7 @@ private:
     AccountIntegrationManager accountManager;
     
     // Route mapping
-    std::map<std::string, std::function<void(const std::string&, const std::string&, const std::string&, std::string&)>> routes;
+    std::map<std::string, std::function<void(const std::string&, const std::string&, const std::string&, const std::map<std::string, std::string>&, std::string&)>> routes;
     
     bool setupSocket();
     void acceptConnections();
