@@ -46,6 +46,7 @@ public:
     void handleGroupRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
     void handleBackupRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
     void handleAccountIntegrationRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
+    void handleOAuthCallbackRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
     
     // CORS and utility functions
     void addCORSHeaders(std::string& response);
@@ -53,8 +54,8 @@ public:
     bool validateToken(const std::string& token, std::string& userId);
     
     // JSON helpers
-    std::string createJSONResponse(bool success, const std::string& message, const std::string& data = "");
-    std::string createErrorResponse(const std::string& error);
+    std::string createJSONResponse(bool success, const std::string& message, const std::string& data = "", bool fullHttp = false);
+    std::string createErrorResponse(const std::string& error, bool fullHttp = false);
 
 private:
     int port_;

@@ -12,7 +12,8 @@ import {
   Instagram,
   MessageSquare,
   Smartphone,
-  Loader
+  Loader,
+  ExternalLink
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { 
@@ -30,8 +31,10 @@ const AccountIntegration: React.FC = () => {
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(true);
 
   // Form states for different providers
-  const [gmailForm, setGmailForm] = useState({ email: '', password: '' });
+  const [gmailForm, setGmailForm] = useState({ email: '', authCode: '' });
   const [whatsappForm, setWhatsappForm] = useState({ phoneNumber: '', password: '' });
+  const [gmailOAuthUrl, setGmailOAuthUrl] = useState<string>('');
+  const [showGmailOAuth, setShowGmailOAuth] = useState(false);
 
   const emailProviders = [
     { name: 'Gmail', icon: Mail, color: 'bg-red-500' },
@@ -76,11 +79,21 @@ const AccountIntegration: React.FC = () => {
       let success = false;
 
       if (selectedProvider === 'Gmail') {
-        const request: ConnectGmailRequest = {
-          email: gmailForm.email,
-          password: gmailForm.password
-        };
-        success = await accountIntegrationService.connectGmail(request);
+        if (showGmailOAuth) {
+          // Use OAuth2 flow
+          const request = {
+            email: gmailForm.email,
+            code: gmailForm.authCode
+          };
+          success = await accountIntegrationService.connectGmailOAuth2(request);
+        } else {
+          // Show OAuth2 instructions
+          setShowGmailOAuth(true);
+          const url = await accountIntegrationService.getGmailOAuth2Url();
+          setGmailOAuthUrl(url);
+          setIsLoading(false);
+          return;
+        }
       } else if (selectedProvider === 'WhatsApp') {
         const request: ConnectWhatsAppRequest = {
           phoneNumber: whatsappForm.phoneNumber,
@@ -95,8 +108,10 @@ const AccountIntegration: React.FC = () => {
 
       if (success) {
         setIsAddingAccount(false);
-        setGmailForm({ email: '', password: '' });
+        setGmailForm({ email: '', authCode: '' });
         setWhatsappForm({ phoneNumber: '', password: '' });
+        setShowGmailOAuth(false);
+        setGmailOAuthUrl('');
         await loadConnectedAccounts(); // Refresh the accounts list
       }
     } catch (error) {
@@ -268,6 +283,11 @@ const AccountIntegration: React.FC = () => {
                   </div>
                   <p className="text-xs text-dark-400">
                     Connect your {provider.name} account to receive emails in Cockpit
+                    {provider.name === 'Gmail' && (
+                      <span className="block mt-1 text-yellow-400">
+                        ⚠️ Requires OAuth2 authentication
+                      </span>
+                    )}
                   </p>
                 </div>
               ))}
@@ -314,36 +334,58 @@ const AccountIntegration: React.FC = () => {
               Connect {selectedProvider}
             </h2>
             <p className="text-dark-400 mb-6">
-              Enter your {selectedProvider} credentials to connect your account
+              {selectedProvider === 'Gmail' && showGmailOAuth 
+                ? 'Complete the OAuth2 authentication process'
+                : `Enter your ${selectedProvider} credentials to connect your account`
+              }
             </p>
             
             <div className="space-y-4">
-              {selectedProvider === 'Gmail' && (
+              {selectedProvider === 'Gmail' && !showGmailOAuth && (
+                <div>
+                  <label className="block text-sm font-medium text-dark-300 mb-2">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={gmailForm.email}
+                    onChange={(e) => setGmailForm(prev => ({ ...prev, email: e.target.value }))}
+                    className="input-field w-full"
+                    placeholder="Enter your Gmail address"
+                  />
+                </div>
+              )}
+              
+              {selectedProvider === 'Gmail' && showGmailOAuth && (
                 <>
-                  <div>
-                    <label className="block text-sm font-medium text-dark-300 mb-2">
-                      Email Address
-                    </label>
-                    <input
-                      type="email"
-                      value={gmailForm.email}
-                      onChange={(e) => setGmailForm(prev => ({ ...prev, email: e.target.value }))}
-                      className="input-field w-full"
-                      placeholder="Enter your Gmail address"
-                    />
+                  <div className="bg-dark-800 rounded-lg p-4 mb-4">
+                    <h3 className="text-sm font-medium text-white mb-2">Step 1: Authorize Access</h3>
+                    <p className="text-xs text-dark-400 mb-3">
+                      Click the button below to authorize Cockpit to access your Gmail account
+                    </p>
+                    <button
+                      onClick={() => window.open(gmailOAuthUrl, '_blank')}
+                      className="btn-primary w-full flex items-center justify-center space-x-2"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      <span>Authorize Gmail Access</span>
+                    </button>
                   </div>
                   
                   <div>
                     <label className="block text-sm font-medium text-dark-300 mb-2">
-                      Password
+                      Authorization Code
                     </label>
                     <input
-                      type="password"
-                      value={gmailForm.password}
-                      onChange={(e) => setGmailForm(prev => ({ ...prev, password: e.target.value }))}
+                      type="text"
+                      value={gmailForm.authCode}
+                      onChange={(e) => setGmailForm(prev => ({ ...prev, authCode: e.target.value }))}
                       className="input-field w-full"
-                      placeholder="Enter your Gmail password"
+                      placeholder="Paste the authorization code from Google"
                     />
+                    <p className="text-xs text-dark-500 mt-1">
+                      After authorizing, copy the code from the URL and paste it here
+                    </p>
                   </div>
                 </>
               )}
@@ -395,8 +437,10 @@ const AccountIntegration: React.FC = () => {
               <button
                 onClick={() => {
                   setIsAddingAccount(false);
-                  setGmailForm({ email: '', password: '' });
+                  setGmailForm({ email: '', authCode: '' });
                   setWhatsappForm({ phoneNumber: '', password: '' });
+                  setShowGmailOAuth(false);
+                  setGmailOAuthUrl('');
                 }}
                 className="btn-secondary flex-1"
                 disabled={isLoading}
@@ -413,6 +457,8 @@ const AccountIntegration: React.FC = () => {
                     <Loader className="w-4 h-4 animate-spin" />
                     <span>Connecting...</span>
                   </>
+                ) : selectedProvider === 'Gmail' && !showGmailOAuth ? (
+                  <span>Continue with OAuth2</span>
                 ) : (
                   <span>Connect Account</span>
                 )}
