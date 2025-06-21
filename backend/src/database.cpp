@@ -139,6 +139,23 @@ bool Database::createTables() {
         )
     )";
     
+    const char* createGroupInvitationsTable = R"(
+        CREATE TABLE IF NOT EXISTS group_invitations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            inviter_id INTEGER NOT NULL,
+            invitee_id INTEGER NOT NULL,
+            role TEXT DEFAULT 'member',
+            status TEXT DEFAULT 'pending',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME DEFAULT (datetime('now', '+30 minutes')),
+            responded_at DATETIME,
+            FOREIGN KEY (group_id) REFERENCES groups (id),
+            FOREIGN KEY (inviter_id) REFERENCES users (id),
+            FOREIGN KEY (invitee_id) REFERENCES users (id)
+        )
+    )";
+    
     char* errMsg = nullptr;
     
     if (sqlite3_exec(db_, createUsersTable, nullptr, nullptr, &errMsg) != SQLITE_OK) {
@@ -189,6 +206,13 @@ bool Database::createTables() {
         return false;
     }
     std::cout << "[DEBUG] Chat_backups table created successfully" << std::endl;
+    
+    if (sqlite3_exec(db_, createGroupInvitationsTable, nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        std::cerr << "Failed to create group_invitations table: " << errMsg << std::endl;
+        sqlite3_free(errMsg);
+        return false;
+    }
+    std::cout << "[DEBUG] Group_invitations table created successfully" << std::endl;
     
     return true;
 }
@@ -394,7 +418,7 @@ bool Database::saveMessage(const Message& message) {
         
         // Check if sender is a member of the group
         std::cout << "[DEBUG] saveMessage: About to check group membership" << std::endl;
-        bool isMember = isGroupMember(message.group_id, message.sender_id);
+        bool isMember = isGroupMemberInternal(message.group_id, message.sender_id);
         std::cout << "[DEBUG] saveMessage: isGroupMember returned: " << (isMember ? "true" : "false") << std::endl;
         if (!isMember) {
             std::cerr << "[DEBUG] User " << message.sender_id << " is not a member of group " << message.group_id << std::endl;
@@ -449,19 +473,10 @@ bool Database::saveMessage(const Message& message) {
     
     std::cout << "[DEBUG] saveMessage: About to execute sqlite3_step" << std::endl;
     int rc = sqlite3_step(stmt);
-    std::cout << "[DEBUG] saveMessage: sqlite3_step returned: " << rc << std::endl;
-    if (rc != SQLITE_DONE) {
-        std::cerr << "[DEBUG] sqlite3_step failed with code " << rc << ": " << sqlite3_errmsg(db_) << std::endl;
-    }
-    
-    std::cout << "[DEBUG] saveMessage: About to finalize statement" << std::endl;
+    std::cout << "[DEBUG] saveMessage: SQL insert result: " << (rc == SQLITE_DONE ? "SUCCESS" : "FAILED") << std::endl;
     sqlite3_finalize(stmt);
-    std::cout << "[DEBUG] saveMessage: Statement finalized" << std::endl;
-    
-    bool success = (rc == SQLITE_DONE);
-    std::cout << "[DEBUG] saveMessage result: " << (success ? "SUCCESS" : "FAILED") << std::endl;
     std::cout << "[DEBUG] saveMessage: Function ending" << std::endl;
-    return success;
+    return rc == SQLITE_DONE;
 }
 
 std::vector<Message> Database::getMessages(int userId, int otherUserId, int limit) {
@@ -574,7 +589,7 @@ bool Database::deleteMessage(int messageId) {
     return rc == SQLITE_DONE;
 }
 
-int Database::createGroup(const std::string& name, const std::string& description, int creatorId) {
+bool Database::createGroup(const std::string& name, const std::string& description, int creatorId) {
     std::lock_guard<std::mutex> lock(dbMutex_);
     
     const char* sql = "INSERT INTO groups (name, description, creator_id) VALUES (?, ?, ?)";
@@ -582,7 +597,7 @@ int Database::createGroup(const std::string& name, const std::string& descriptio
     
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
-        return -1;
+        return false;
     }
     
     sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_STATIC);
@@ -593,14 +608,67 @@ int Database::createGroup(const std::string& name, const std::string& descriptio
     sqlite3_finalize(stmt);
     
     if (rc == SQLITE_DONE) {
-        return sqlite3_last_insert_rowid(db_);
+        return true;
     } else {
-        return -1;
+        return false;
     }
 }
 
 bool Database::addUserToGroup(int groupId, int userId, const std::string& role) {
+    std::cout << "[DEBUG] addUserToGroup: ENTERING FUNCTION" << std::endl;
     std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    return addUserToGroupInternal(groupId, userId, role);
+}
+
+bool Database::addUserToGroupInternal(int groupId, int userId, const std::string& role) {
+    std::cout << "[DEBUG] addUserToGroupInternal: groupId=" << groupId << ", userId=" << userId << ", role=" << role << std::endl;
+    
+    // Check if user already exists (internal call, no mutex needed)
+    const char* userSql = "SELECT id, username FROM users WHERE id = ?";
+    sqlite3_stmt* userStmt;
+    if (sqlite3_prepare_v2(db_, userSql, -1, &userStmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare user statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    sqlite3_bind_int(userStmt, 1, userId);
+    
+    std::string username;
+    if (sqlite3_step(userStmt) == SQLITE_ROW) {
+        username = (const char*)sqlite3_column_text(userStmt, 1);
+        std::cout << "[DEBUG] addUserToGroupInternal: Found user: " << username << std::endl;
+    } else {
+        std::cout << "[DEBUG] addUserToGroupInternal: User not found with id=" << userId << std::endl;
+        sqlite3_finalize(userStmt);
+        return false;
+    }
+    sqlite3_finalize(userStmt);
+    
+    // Check if group exists (internal call, no mutex needed)
+    const char* groupSql = "SELECT id, name FROM groups WHERE id = ?";
+    sqlite3_stmt* groupStmt;
+    if (sqlite3_prepare_v2(db_, groupSql, -1, &groupStmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare group statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    sqlite3_bind_int(groupStmt, 1, groupId);
+    
+    std::string groupName;
+    if (sqlite3_step(groupStmt) == SQLITE_ROW) {
+        groupName = (const char*)sqlite3_column_text(groupStmt, 1);
+        std::cout << "[DEBUG] addUserToGroupInternal: Found group: " << groupName << std::endl;
+    } else {
+        std::cout << "[DEBUG] addUserToGroupInternal: Group not found with id=" << groupId << std::endl;
+        sqlite3_finalize(groupStmt);
+        return false;
+    }
+    sqlite3_finalize(groupStmt);
+    
+    // Check if user is already a member
+    if (isGroupMemberInternal(groupId, userId)) {
+        std::cout << "[DEBUG] addUserToGroupInternal: User is already a member of this group" << std::endl;
+        return true; // Already a member, consider this success
+    }
     
     const char* sql = "INSERT OR REPLACE INTO group_members (group_id, user_id, role) VALUES (?, ?, ?)";
     sqlite3_stmt* stmt;
@@ -617,7 +685,15 @@ bool Database::addUserToGroup(int groupId, int userId, const std::string& role) 
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     
-    return rc == SQLITE_DONE;
+    std::cout << "[DEBUG] addUserToGroupInternal: Insert result=" << rc << " (SQLITE_DONE=" << SQLITE_DONE << ")" << std::endl;
+    
+    if (rc != SQLITE_DONE) {
+        std::cout << "[DEBUG] addUserToGroupInternal: Insert failed with error: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    std::cout << "[DEBUG] addUserToGroupInternal: SUCCESS - User added to group" << std::endl;
+    return true;
 }
 
 bool Database::removeUserFromGroup(int groupId, int userId) {
@@ -935,24 +1011,37 @@ bool Database::deleteGroup(int groupId) {
 
 bool Database::isGroupMember(int groupId, int userId) {
     std::lock_guard<std::mutex> lock(dbMutex_);
+    return isGroupMemberInternal(groupId, userId);
+}
+
+bool Database::isGroupMemberInternal(int groupId, int userId) {
+    std::cout << "[DEBUG] isGroupMemberInternal: Starting function with groupId=" << groupId << ", userId=" << userId << std::endl;
     
     const char* sql = "SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ?";
     sqlite3_stmt* stmt;
     
+    std::cout << "[DEBUG] isGroupMemberInternal: About to prepare statement" << std::endl;
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
         return false;
     }
+    std::cout << "[DEBUG] isGroupMemberInternal: Statement prepared successfully" << std::endl;
     
     sqlite3_bind_int(stmt, 1, groupId);
     sqlite3_bind_int(stmt, 2, userId);
+    std::cout << "[DEBUG] isGroupMemberInternal: Parameters bound" << std::endl;
     
     bool isMember = false;
+    std::cout << "[DEBUG] isGroupMemberInternal: About to execute query" << std::endl;
     if (sqlite3_step(stmt) == SQLITE_ROW) {
         isMember = sqlite3_column_int(stmt, 0) > 0;
+        std::cout << "[DEBUG] isGroupMemberInternal: Query executed, count=" << sqlite3_column_int(stmt, 0) << ", isMember=" << (isMember ? "true" : "false") << std::endl;
+    } else {
+        std::cout << "[DEBUG] isGroupMemberInternal: Query executed, no rows returned" << std::endl;
     }
     
     sqlite3_finalize(stmt);
+    std::cout << "[DEBUG] isGroupMemberInternal: Statement finalized, returning " << (isMember ? "true" : "false") << std::endl;
     return isMember;
 }
 
@@ -1232,4 +1321,260 @@ User Database::getUserByEmail(const std::string& email) {
     }
     sqlite3_finalize(stmt);
     return user;
+}
+
+// Group invitation methods
+bool Database::createGroupInvitation(int groupId, int inviterId, int inviteeId, const std::string& role) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    std::cout << "[DEBUG] createGroupInvitation: groupId=" << groupId << ", inviterId=" << inviterId << ", inviteeId=" << inviteeId << ", role=" << role << std::endl;
+    
+    // Check if invitation already exists
+    const char* checkSql = "SELECT id FROM group_invitations WHERE group_id = ? AND invitee_id = ? AND status = 'pending'";
+    sqlite3_stmt* checkStmt;
+    
+    if (sqlite3_prepare_v2(db_, checkSql, -1, &checkStmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare check statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_int(checkStmt, 1, groupId);
+    sqlite3_bind_int(checkStmt, 2, inviteeId);
+    
+    if (sqlite3_step(checkStmt) == SQLITE_ROW) {
+        int existingId = sqlite3_column_int(checkStmt, 0);
+        std::cout << "[DEBUG] createGroupInvitation: Found existing invitation with id=" << existingId << ", returning false" << std::endl;
+        sqlite3_finalize(checkStmt);
+        return false; // Invitation already exists
+    }
+    
+    std::cout << "[DEBUG] createGroupInvitation: No existing invitation found, creating new one" << std::endl;
+    sqlite3_finalize(checkStmt);
+    
+    // Create new invitation
+    const char* sql = "INSERT INTO group_invitations (group_id, inviter_id, invitee_id, role, expires_at) VALUES (?, ?, ?, ?, datetime('now', '+24 hours'))";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_int(stmt, 1, groupId);
+    sqlite3_bind_int(stmt, 2, inviterId);
+    sqlite3_bind_int(stmt, 3, inviteeId);
+    sqlite3_bind_text(stmt, 4, role.c_str(), -1, SQLITE_STATIC);
+    
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    
+    std::cout << "[DEBUG] createGroupInvitation: Insert result=" << rc << " (SQLITE_DONE=" << SQLITE_DONE << ")" << std::endl;
+    
+    return rc == SQLITE_DONE;
+}
+
+bool Database::acceptGroupInvitation(int invitationId, int inviteeId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    std::cout << "[DEBUG] acceptGroupInvitation: invitationId=" << invitationId << ", inviteeId=" << inviteeId << std::endl;
+    
+    // Get invitation details (only if not expired)
+    const char* getSql = "SELECT group_id, role FROM group_invitations WHERE id = ? AND invitee_id = ? AND status = 'pending' AND expires_at > datetime('now')";
+    sqlite3_stmt* getStmt;
+    
+    if (sqlite3_prepare_v2(db_, getSql, -1, &getStmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare get statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_int(getStmt, 1, invitationId);
+    sqlite3_bind_int(getStmt, 2, inviteeId);
+    
+    int groupId = -1;
+    std::string role;
+    
+    if (sqlite3_step(getStmt) == SQLITE_ROW) {
+        groupId = sqlite3_column_int(getStmt, 0);
+        role = (const char*)sqlite3_column_text(getStmt, 1);
+        std::cout << "[DEBUG] acceptGroupInvitation: Found invitation - groupId=" << groupId << ", role=" << role << std::endl;
+    } else {
+        std::cout << "[DEBUG] acceptGroupInvitation: No invitation found or already processed/expired" << std::endl;
+        std::cout << "[DEBUG] acceptGroupInvitation: SQL error: " << sqlite3_errmsg(db_) << std::endl;
+    }
+    
+    sqlite3_finalize(getStmt);
+    
+    if (groupId == -1) {
+        std::cout << "[DEBUG] acceptGroupInvitation: Returning false - invitation not found" << std::endl;
+        return false; // Invitation not found, already processed, or expired
+    }
+    
+    // Update invitation status
+    const char* updateSql = "UPDATE group_invitations SET status = 'accepted', responded_at = datetime('now') WHERE id = ?";
+    sqlite3_stmt* updateStmt;
+    
+    if (sqlite3_prepare_v2(db_, updateSql, -1, &updateStmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare update statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_int(updateStmt, 1, invitationId);
+    
+    int updateRc = sqlite3_step(updateStmt);
+    sqlite3_finalize(updateStmt);
+    
+    std::cout << "[DEBUG] acceptGroupInvitation: Update result=" << updateRc << " (SQLITE_DONE=" << SQLITE_DONE << ")" << std::endl;
+    
+    if (updateRc != SQLITE_DONE) {
+        std::cout << "[DEBUG] acceptGroupInvitation: Update failed" << std::endl;
+        return false;
+    }
+    
+    std::cout << "[DEBUG] acceptGroupInvitation: Update successful, adding user to group" << std::endl;
+    
+    // Add user to group
+    std::cout << "[DEBUG] acceptGroupInvitation: About to call addUserToGroup with groupId=" << groupId << ", inviteeId=" << inviteeId << ", role=" << role << std::endl;
+    bool addResult = addUserToGroupInternal(groupId, inviteeId, role);
+    std::cout << "[DEBUG] acceptGroupInvitation: addUserToGroup result=" << (addResult ? "SUCCESS" : "FAILED") << std::endl;
+    
+    if (addResult) {
+        std::cout << "[DEBUG] acceptGroupInvitation: COMPLETE SUCCESS - User added to group" << std::endl;
+    } else {
+        std::cout << "[DEBUG] acceptGroupInvitation: FAILED - Could not add user to group" << std::endl;
+    }
+    
+    return addResult;
+}
+
+bool Database::declineGroupInvitation(int invitationId, int inviteeId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "UPDATE group_invitations SET status = 'declined', responded_at = datetime('now') WHERE id = ? AND invitee_id = ? AND status = 'pending'";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_int(stmt, 1, invitationId);
+    sqlite3_bind_int(stmt, 2, inviteeId);
+    
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    
+    return rc == SQLITE_DONE;
+}
+
+std::vector<GroupInvitation> Database::getPendingInvitations(int userId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    // First, clean up expired invitations
+    const char* cleanupSql = "DELETE FROM group_invitations WHERE status = 'pending' AND expires_at <= datetime('now')";
+    char* errMsg = nullptr;
+    if (sqlite3_exec(db_, cleanupSql, nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        std::cerr << "Failed to cleanup expired invitations: " << errMsg << std::endl;
+        sqlite3_free(errMsg);
+    }
+    
+    // Also clean up old processed invitations (but not too frequently)
+    static int cleanupCounter = 0;
+    if (++cleanupCounter % 10 == 0) { // Clean up every 10th call
+        cleanupOldInvitations();
+    }
+    
+    const char* sql = "SELECT id, group_id, inviter_id, invitee_id, role, status, created_at, expires_at, responded_at FROM group_invitations WHERE invitee_id = ? AND status = 'pending' AND expires_at > datetime('now') ORDER BY created_at DESC";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return {};
+    }
+    
+    sqlite3_bind_int(stmt, 1, userId);
+    
+    std::vector<GroupInvitation> invitations;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        GroupInvitation invitation;
+        invitation.id = sqlite3_column_int(stmt, 0);
+        invitation.group_id = sqlite3_column_int(stmt, 1);
+        invitation.inviter_id = sqlite3_column_int(stmt, 2);
+        invitation.invitee_id = sqlite3_column_int(stmt, 3);
+        invitation.role = (const char*)sqlite3_column_text(stmt, 4);
+        invitation.status = (const char*)sqlite3_column_text(stmt, 5);
+        invitation.created_at = (const char*)sqlite3_column_text(stmt, 6);
+        invitation.expires_at = (const char*)sqlite3_column_text(stmt, 7);
+        invitation.responded_at = sqlite3_column_text(stmt, 8) ? (const char*)sqlite3_column_text(stmt, 8) : "";
+        invitations.push_back(invitation);
+    }
+    
+    sqlite3_finalize(stmt);
+    return invitations;
+}
+
+std::vector<GroupInvitation> Database::getGroupInvitations(int groupId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "SELECT id, group_id, inviter_id, invitee_id, role, status, created_at, expires_at, responded_at FROM group_invitations WHERE group_id = ? ORDER BY created_at DESC";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return {};
+    }
+    
+    sqlite3_bind_int(stmt, 1, groupId);
+    
+    std::vector<GroupInvitation> invitations;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        GroupInvitation invitation;
+        invitation.id = sqlite3_column_int(stmt, 0);
+        invitation.group_id = sqlite3_column_int(stmt, 1);
+        invitation.inviter_id = sqlite3_column_int(stmt, 2);
+        invitation.invitee_id = sqlite3_column_int(stmt, 3);
+        invitation.role = (const char*)sqlite3_column_text(stmt, 4);
+        invitation.status = (const char*)sqlite3_column_text(stmt, 5);
+        invitation.created_at = (const char*)sqlite3_column_text(stmt, 6);
+        invitation.expires_at = (const char*)sqlite3_column_text(stmt, 7);
+        invitation.responded_at = sqlite3_column_text(stmt, 8) ? (const char*)sqlite3_column_text(stmt, 8) : "";
+        invitations.push_back(invitation);
+    }
+    
+    sqlite3_finalize(stmt);
+    return invitations;
+}
+
+bool Database::deleteInvitation(int invitationId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "DELETE FROM group_invitations WHERE id = ?";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_int(stmt, 1, invitationId);
+    
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    
+    return rc == SQLITE_DONE;
+}
+
+bool Database::cleanupOldInvitations() {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    // Remove invitations that are older than 7 days and have been processed (accepted/declined)
+    const char* sql = "DELETE FROM group_invitations WHERE (status = 'accepted' OR status = 'declined') AND created_at < datetime('now', '-7 days')";
+    char* errMsg = nullptr;
+    
+    if (sqlite3_exec(db_, sql, nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        std::cerr << "Failed to cleanup old invitations: " << errMsg << std::endl;
+        sqlite3_free(errMsg);
+        return false;
+    }
+    
+    return true;
 } 

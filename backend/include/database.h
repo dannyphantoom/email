@@ -64,6 +64,18 @@ struct ChatBackup {
     std::string description;
 };
 
+struct GroupInvitation {
+    int id;
+    int group_id;
+    int inviter_id;
+    int invitee_id;
+    std::string role;
+    std::string status; // "pending", "accepted", "declined"
+    std::string created_at;
+    std::string expires_at;
+    std::string responded_at;
+};
+
 struct ChatSession {
     int id;
     int user_id;
@@ -100,8 +112,9 @@ public:
     bool deleteMessage(int messageId);
 
     // Group operations
-    int createGroup(const std::string& name, const std::string& description, int creatorId);
+    bool createGroup(const std::string& name, const std::string& description, int creatorId);
     bool addUserToGroup(int groupId, int userId, const std::string& role = "member");
+    bool addUserToGroupInternal(int groupId, int userId, const std::string& role = "member");
     bool removeUserFromGroup(int groupId, int userId);
     std::vector<Group> getUserGroups(int userId);
     std::vector<User> getGroupMembers(int groupId);
@@ -110,8 +123,18 @@ public:
     bool updateGroup(int groupId, const std::string& name, const std::string& description);
     bool deleteGroup(int groupId);
     bool isGroupMember(int groupId, int userId);
+    bool isGroupMemberInternal(int groupId, int userId);
     bool isGroupAdmin(int groupId, int userId);
     bool updateMemberRole(int groupId, int userId, const std::string& role);
+
+    // Group invitation operations
+    bool createGroupInvitation(int groupId, int inviterId, int inviteeId, const std::string& role = "member");
+    bool acceptGroupInvitation(int invitationId, int inviteeId);
+    bool declineGroupInvitation(int invitationId, int inviteeId);
+    std::vector<GroupInvitation> getPendingInvitations(int userId);
+    std::vector<GroupInvitation> getGroupInvitations(int groupId);
+    bool deleteInvitation(int invitationId);
+    bool cleanupOldInvitations(); // Clean up old processed invitations
 
     // Chat session operations
     bool createOrUpdateChatSession(int userId, int otherUserId, int groupId, 

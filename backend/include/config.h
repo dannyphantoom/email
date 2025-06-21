@@ -32,4 +32,6 @@ struct APIConfig {
     static const std::string USER_AGENT;
 };
 
+std::string getDatabasePath();
+
 #endif // CONFIG_H 

@@ -1,17 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
 import { LogOut, MessageCircle, Users, Settings, Plus, Search, Inbox, Download } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import ChatWindow from '../components/ChatWindow';
 import Sidebar from '../components/Sidebar';
 import UserProfileModal from '../components/UserProfileModal';
+import GroupInvitations from '../components/GroupInvitations';
 import { toast } from 'react-hot-toast';
 
 const Messenger: React.FC = () => {
-  const { user, logout } = useAuthStore();
+  const { user, logout, token } = useAuthStore();
   const navigate = useNavigate();
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [isUserProfileOpen, setIsUserProfileOpen] = useState(false);
+  const sidebarRef = useRef<any>(null);
 
   const handleLogout = () => {
     logout();
@@ -79,7 +81,7 @@ const Messenger: React.FC = () => {
         </div>
 
         {/* Sidebar Content */}
-        <Sidebar onChatSelect={setSelectedChat} selectedChat={selectedChat} />
+        <Sidebar ref={sidebarRef} onChatSelect={setSelectedChat} selectedChat={selectedChat} />
       </div>
 
       {/* Main Chat Area */}
@@ -118,6 +120,19 @@ const Messenger: React.FC = () => {
         isOpen={isUserProfileOpen} 
         onClose={() => setIsUserProfileOpen(false)} 
       />
+
+      {/* Group Invitations Popup */}
+      {token && (
+        <GroupInvitations 
+          token={token} 
+          onAction={() => {
+            // Refresh the group list in the sidebar
+            if (sidebarRef.current && sidebarRef.current.refreshGroups) {
+              sidebarRef.current.refreshGroups();
+            }
+          }} 
+        />
+      )}
     </div>
   );
 };

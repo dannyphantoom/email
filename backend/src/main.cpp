@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include "server.h"
+#include "config.h"
 
 std::unique_ptr<Server> server;
 
@@ -33,7 +34,7 @@ void printVersion() {
 
 int main(int argc, char* argv[]) {
     int port = 8080;
-    std::string dbPath = "cockpit.db";
+    std::string dbPath = getDatabasePath();
     bool initDb = false;
     
     // Parse command line arguments

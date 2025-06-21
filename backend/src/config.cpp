@@ -26,4 +26,9 @@ const std::string TelegramConfig::BOT_API_URL = "https://api.telegram.org/bot";
 // General API Configuration
 const int APIConfig::REQUEST_TIMEOUT = 30;
 const int APIConfig::MAX_RETRIES = 3;
-const std::string APIConfig::USER_AGENT = "Cockpit-Messenger/1.0"; 
+const std::string APIConfig::USER_AGENT = "Cockpit-Messenger/1.0";
+
+std::string getDatabasePath() {
+    // Always use the absolute path to the root cockpit.db
+    return "/home/danny/email/cockpit.db";
+} 

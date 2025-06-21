@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { Search, Plus, Users, MessageCircle, UserPlus, Settings, Trash2, LogOut } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAuthStore } from '../stores/authStore';
 import Modal from './Modal';
+import GroupInvitations from './GroupInvitations';
 
 interface Chat {
   id: string;
@@ -20,7 +21,7 @@ interface SidebarProps {
   selectedChat: string | null;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
+const Sidebar = forwardRef<unknown, SidebarProps>(({ onChatSelect, selectedChat }, ref) => {
   const { token } = useAuthStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'chats' | 'groups'>('chats');
@@ -275,6 +276,11 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
   };
 
   const filteredChats = getFilteredChats();
+
+  // Expose refreshGroups method to parent
+  useImperativeHandle(ref, () => ({
+    refreshGroups: fetchGroups
+  }));
 
   return (
     <div className="flex-1 flex flex-col">
@@ -560,6 +566,6 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
       </Modal>
     </div>
   );
-};
+});
 
 export default Sidebar; 

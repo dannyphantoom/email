@@ -92,6 +92,14 @@ void Server::setupRoutes() {
     routes["/integration/sync"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
         handleAccountIntegrationRoutes(method, path, body, headers, response);
     };
+    
+    // Invitations routes
+    routes["/invitations"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleGroupRoutes(method, path, body, headers, response);
+    };
+    routes["/api/invitations"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleGroupRoutes(method, path, body, headers, response);
+    };
 }
 
 bool Server::initialize() {
@@ -701,7 +709,7 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
             response = createJSONResponse(true, "Group info retrieved successfully", groupJson.dump(), true);
         }
         else if (method == "POST" && (path.find("/groups/") == 0 || path.find("/api/groups/") == 0) && path.find("/members") != std::string::npos) {
-            // Add member to group
+            // Invite member to group
             size_t groupIdStart = path.find("/groups/") != std::string::npos ? path.find("/groups/") + 8 : path.find("/api/groups/") + 12;
             size_t groupIdEnd = path.find("/members");
             int groupId = std::stoi(path.substr(groupIdStart, groupIdEnd - groupIdStart));
@@ -728,12 +736,15 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
                 return;
             }
             
-            bool success = groupChat_->addMember(groupId, user.id, role);
+            // Create invitation instead of directly adding
+            std::cout << "[DEBUG] Creating invitation for user " << user.id << " to group " << groupId << " from user " << userIdInt << std::endl;
+            bool success = database_->createGroupInvitation(groupId, userIdInt, user.id, role);
+            std::cout << "[DEBUG] Invitation creation result: " << (success ? "SUCCESS" : "FAILED") << std::endl;
             
             if (success) {
-                response = createJSONResponse(true, "Member added successfully", "", true);
+                response = createJSONResponse(true, "Invitation sent successfully", "", true);
             } else {
-                response = createErrorResponse("Failed to add member", true);
+                response = createErrorResponse("Failed to send invitation or invitation already exists", true);
             }
         }
         else if (method == "DELETE" && (path.find("/groups/") == 0 || path.find("/api/groups/") == 0) && path.find("/members/") != std::string::npos) {
@@ -908,6 +919,82 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
                 } else {
                     response = createErrorResponse("Failed to send group message", true);
                 }
+            }
+        }
+        else if (method == "GET" && (path == "/invitations" || path == "/api/invitations")) {
+            // Get user's pending invitations
+            auto invitations = database_->getPendingInvitations(userIdInt);
+            json invitationsArray = json::array();
+            
+            for (const auto& invitation : invitations) {
+                json invitationJson;
+                invitationJson["id"] = invitation.id;
+                invitationJson["group_id"] = invitation.group_id;
+                invitationJson["inviter_id"] = invitation.inviter_id;
+                invitationJson["invitee_id"] = invitation.invitee_id;
+                invitationJson["role"] = invitation.role;
+                invitationJson["status"] = invitation.status;
+                invitationJson["created_at"] = invitation.created_at;
+                invitationJson["expires_at"] = invitation.expires_at;
+                invitationJson["responded_at"] = invitation.responded_at;
+                
+                // Get group info
+                Group group = database_->getGroupById(invitation.group_id);
+                invitationJson["group_name"] = group.name;
+                invitationJson["group_description"] = group.description;
+                
+                // Get inviter info
+                User inviter = database_->getUserById(invitation.inviter_id);
+                invitationJson["inviter_username"] = inviter.username;
+                
+                invitationsArray.push_back(invitationJson);
+            }
+            
+            response = createJSONResponse(true, "Invitations retrieved successfully", invitationsArray.dump(), true);
+        }
+        else if (method == "POST" && (path.find("/invitations/") == 0 || path.find("/api/invitations/") == 0) && path.find("/accept") != std::string::npos) {
+            // Accept invitation
+            std::cout << "[DEBUG] Accept invitation route reached" << std::endl;
+            std::cout << "[DEBUG] Path: " << path << std::endl;
+            std::cout << "[DEBUG] About to parse invitation ID..." << std::endl;
+            size_t invitationIdStart = path.find("/invitations/") != std::string::npos ? path.find("/invitations/") + 12 : path.find("/api/invitations/") + 16;
+            size_t invitationIdEnd = path.find("/accept");
+            std::cout << "[DEBUG] invitationIdStart: " << invitationIdStart << ", invitationIdEnd: " << invitationIdEnd << std::endl;
+            std::string invitationIdStr = path.substr(invitationIdStart, invitationIdEnd - invitationIdStart);
+            if (!invitationIdStr.empty() && invitationIdStr[0] == '/') {
+                invitationIdStr = invitationIdStr.substr(1);
+            }
+            std::cout << "[DEBUG] invitationIdStr: '" << invitationIdStr << "'" << std::endl;
+            int invitationId = std::stoi(invitationIdStr);
+            
+            std::cout << "[DEBUG] Accept invitation: invitationId=" << invitationId << ", userIdInt=" << userIdInt << std::endl;
+            
+            bool success = database_->acceptGroupInvitation(invitationId, userIdInt);
+            
+            std::cout << "[DEBUG] Accept invitation result: " << (success ? "SUCCESS" : "FAILED") << std::endl;
+            
+            if (success) {
+                response = createJSONResponse(true, "Invitation accepted successfully", "", true);
+            } else {
+                response = createErrorResponse("Failed to accept invitation", true);
+            }
+        }
+        else if (method == "POST" && (path.find("/invitations/") == 0 || path.find("/api/invitations/") == 0) && path.find("/decline") != std::string::npos) {
+            // Decline invitation
+            size_t invitationIdStart = path.find("/invitations/") != std::string::npos ? path.find("/invitations/") + 12 : path.find("/api/invitations/") + 16;
+            size_t invitationIdEnd = path.find("/decline");
+            std::string invitationIdStr = path.substr(invitationIdStart, invitationIdEnd - invitationIdStart);
+            if (!invitationIdStr.empty() && invitationIdStr[0] == '/') {
+                invitationIdStr = invitationIdStr.substr(1);
+            }
+            int invitationId = std::stoi(invitationIdStr);
+            
+            bool success = database_->declineGroupInvitation(invitationId, userIdInt);
+            
+            if (success) {
+                response = createJSONResponse(true, "Invitation declined successfully", "", true);
+            } else {
+                response = createErrorResponse("Failed to decline invitation", true);
             }
         }
         else {
@@ -1124,6 +1211,8 @@ void Server::handleRequest(const std::string& request, std::string& response) {
         
         parseRequest(request, method, path, headers, body);
         
+        std::cout << "[DEBUG] handleRequest: method=" << method << ", path=" << path << std::endl;
+        
         // Find the route handler using prefix matching
         std::function<void(const std::string&, const std::string&, const std::string&, const std::map<std::string, std::string>&, std::string&)> routeHandler = nullptr;
         std::string matchedPrefix;
@@ -1136,6 +1225,8 @@ void Server::handleRequest(const std::string& request, std::string& response) {
                 }
             }
         }
+        
+        std::cout << "[DEBUG] Matched prefix: " << matchedPrefix << std::endl;
         
         if (routeHandler) {
             routeHandler(method, path, body, headers, response);
