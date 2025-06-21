@@ -16,20 +16,26 @@ Database::~Database() {
 bool Database::initialize() {
     if (initialized_) return true;
     
+    std::cout << "[DEBUG] Database::initialize() - Opening database: " << dbPath_ << std::endl;
+    
     int rc = sqlite3_open(dbPath_.c_str(), &db_);
     if (rc != SQLITE_OK) {
         std::cerr << "Failed to open database: " << sqlite3_errmsg(db_) << std::endl;
         return false;
     }
     
+    std::cout << "[DEBUG] Database opened successfully" << std::endl;
+    
     // Enable foreign keys
     sqlite3_exec(db_, "PRAGMA foreign_keys = ON", nullptr, nullptr, nullptr);
     
+    std::cout << "[DEBUG] Creating tables..." << std::endl;
     if (!createTables()) {
         std::cerr << "Failed to create tables" << std::endl;
         return false;
     }
     
+    std::cout << "[DEBUG] Creating indexes..." << std::endl;
     if (!createIndexes()) {
         std::cerr << "Failed to create indexes" << std::endl;
         return false;
@@ -140,42 +146,49 @@ bool Database::createTables() {
         sqlite3_free(errMsg);
         return false;
     }
+    std::cout << "[DEBUG] Users table created successfully" << std::endl;
     
     if (sqlite3_exec(db_, createGroupsTable, nullptr, nullptr, &errMsg) != SQLITE_OK) {
         std::cerr << "Failed to create groups table: " << errMsg << std::endl;
         sqlite3_free(errMsg);
         return false;
     }
+    std::cout << "[DEBUG] Groups table created successfully" << std::endl;
     
     if (sqlite3_exec(db_, createMessagesTable, nullptr, nullptr, &errMsg) != SQLITE_OK) {
         std::cerr << "Failed to create messages table: " << errMsg << std::endl;
         sqlite3_free(errMsg);
         return false;
     }
+    std::cout << "[DEBUG] Messages table created successfully" << std::endl;
     
     if (sqlite3_exec(db_, createGroupMembersTable, nullptr, nullptr, &errMsg) != SQLITE_OK) {
         std::cerr << "Failed to create group_members table: " << errMsg << std::endl;
         sqlite3_free(errMsg);
         return false;
     }
+    std::cout << "[DEBUG] Group_members table created successfully" << std::endl;
     
     if (sqlite3_exec(db_, createSessionsTable, nullptr, nullptr, &errMsg) != SQLITE_OK) {
         std::cerr << "Failed to create sessions table: " << errMsg << std::endl;
         sqlite3_free(errMsg);
         return false;
     }
+    std::cout << "[DEBUG] Sessions table created successfully" << std::endl;
     
     if (sqlite3_exec(db_, createChatSessionsTable, nullptr, nullptr, &errMsg) != SQLITE_OK) {
         std::cerr << "Failed to create chat_sessions table: " << errMsg << std::endl;
         sqlite3_free(errMsg);
         return false;
     }
+    std::cout << "[DEBUG] Chat_sessions table created successfully" << std::endl;
     
     if (sqlite3_exec(db_, createChatBackupsTable, nullptr, nullptr, &errMsg) != SQLITE_OK) {
         std::cerr << "Failed to create chat_backups table: " << errMsg << std::endl;
         sqlite3_free(errMsg);
         return false;
     }
+    std::cout << "[DEBUG] Chat_backups table created successfully" << std::endl;
     
     return true;
 }
@@ -240,6 +253,8 @@ bool Database::createUser(const std::string& username, const std::string& email,
 
 User Database::getUserByUsername(const std::string& username) {
     std::lock_guard<std::mutex> lock(dbMutex_);
+    std::cerr << "[DEBUG] getUserByUsername called with username: '" << username << "'" << std::endl;
+    
     const char* sql = "SELECT id, username, email, password_hash, public_key, created_at, is_online FROM users WHERE username = ?";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
@@ -247,6 +262,8 @@ User Database::getUserByUsername(const std::string& username) {
         return User{};
     }
     sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_STATIC);
+    std::cerr << "[DEBUG] getUserByUsername: bound username parameter: '" << username << "'" << std::endl;
+    
     User user{};
     if (sqlite3_step(stmt) == SQLITE_ROW) {
         user.id = sqlite3_column_int(stmt, 0);
@@ -256,7 +273,7 @@ User Database::getUserByUsername(const std::string& username) {
         user.public_key = (const char*)sqlite3_column_text(stmt, 4);
         user.created_at = (const char*)sqlite3_column_text(stmt, 5);
         user.is_online = sqlite3_column_int(stmt, 6) != 0;
-        std::cerr << "[DEBUG] getUserByUsername found: id=" << user.id << ", username='" << user.username << "'" << std::endl;
+        std::cerr << "[DEBUG] getUserByUsername found: id=" << user.id << ", username='" << user.username << "', email='" << user.email << "'" << std::endl;
     } else {
         std::cerr << "[DEBUG] getUserByUsername: no user found for '" << username << "'" << std::endl;
     }
@@ -735,6 +752,8 @@ bool Database::saveSession(const std::string& token, int userId, const std::stri
 int Database::getUserIdFromSession(const std::string& token) {
     std::lock_guard<std::mutex> lock(dbMutex_);
     
+    std::cerr << "[DEBUG] getUserIdFromSession called with token: '" << token << "'" << std::endl;
+    
     const char* sql = "SELECT user_id FROM sessions WHERE token = ? AND expires_at > datetime('now')";
     sqlite3_stmt* stmt;
     
@@ -744,10 +763,14 @@ int Database::getUserIdFromSession(const std::string& token) {
     }
     
     sqlite3_bind_text(stmt, 1, token.c_str(), -1, SQLITE_STATIC);
+    std::cerr << "[DEBUG] getUserIdFromSession: bound token parameter: '" << token << "'" << std::endl;
     
     int userId = -1;
     if (sqlite3_step(stmt) == SQLITE_ROW) {
         userId = sqlite3_column_int(stmt, 0);
+        std::cerr << "[DEBUG] getUserIdFromSession found: userId=" << userId << std::endl;
+    } else {
+        std::cerr << "[DEBUG] getUserIdFromSession: no session found for token: '" << token << "'" << std::endl;
     }
     
     sqlite3_finalize(stmt);
@@ -911,8 +934,7 @@ bool Database::deleteGroup(int groupId) {
 }
 
 bool Database::isGroupMember(int groupId, int userId) {
-    // Note: This function should not acquire dbMutex_ if called from within another function that already holds it
-    // The caller is responsible for ensuring thread safety
+    std::lock_guard<std::mutex> lock(dbMutex_);
     
     const char* sql = "SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ?";
     sqlite3_stmt* stmt;

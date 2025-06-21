@@ -121,8 +121,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId }) => {
   };
 
   const getCurrentUserId = () => {
-    // This should come from your auth store
-    return localStorage.getItem('userId') || '1';
+    // Use the auth store to get the current user ID
+    const { user } = useAuthStore.getState();
+    return user ? user.id.toString() : null;
   };
 
   const scrollToBottom = () => {

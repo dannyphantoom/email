@@ -77,6 +77,7 @@ std::string UserManager::generateSessionToken(int userId) {
 
 bool UserManager::validateSessionToken(const std::string& token, int& userId) {
     userId = database_->getUserIdFromSession(token);
+    std::cerr << "[DEBUG] validateSessionToken: token=" << token << " userId=" << userId << std::endl;
     return userId != -1;
 }
 

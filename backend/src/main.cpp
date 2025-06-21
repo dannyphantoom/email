@@ -82,7 +82,7 @@ int main(int argc, char* argv[]) {
     
     try {
         // Create and initialize server
-        server = std::make_unique<Server>(port);
+        server = std::make_unique<Server>(port, dbPath);
         
         if (!server->initialize()) {
             std::cerr << "Failed to initialize server" << std::endl;

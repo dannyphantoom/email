@@ -20,7 +20,7 @@ class GroupChat;
 
 class Server {
 public:
-    Server(int port = 8080);
+    Server(int port = 8080, const std::string& dbPath = "cockpit.db");
     ~Server();
 
     bool initialize();
@@ -51,7 +51,6 @@ public:
     // CORS and utility functions
     void addCORSHeaders(std::string& response);
     std::string getAuthToken(const std::map<std::string, std::string>& headers);
-    bool validateToken(const std::string& token, std::string& userId);
     
     // JSON helpers
     std::string createJSONResponse(bool success, const std::string& message, const std::string& data = "", bool fullHttp = false);

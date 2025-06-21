@@ -20,7 +20,7 @@
 
 using json = nlohmann::json;
 
-Server::Server(int port) : port_(port), running_(false), database_(std::make_shared<Database>()), 
+Server::Server(int port, const std::string& dbPath) : port_(port), running_(false), database_(std::make_shared<Database>(dbPath)), 
                           userManager_(std::make_shared<UserManager>(database_)),
                           messageHandler_(std::make_shared<MessageHandler>(database_, userManager_)),
                           groupChat_(std::make_shared<GroupChat>(database_)),
@@ -166,7 +166,8 @@ void Server::run() {
         int clientSocket = accept(serverSocket_, (struct sockaddr*)&clientAddr, &clientAddrLen);
         if (clientSocket == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // No connection available, continue
+                // No connection available, sleep briefly to prevent 100% CPU usage
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
             if (errno == EINTR) {
@@ -265,30 +266,41 @@ std::string Server::getAuthToken(const std::map<std::string, std::string>& heade
     return "";
 }
 
-bool Server::validateToken(const std::string& token, std::string& userId) {
-    // TODO: Implement proper JWT token validation
-    // For now, return true if token is not empty
-    if (!token.empty()) {
-        userId = "user123"; // Mock user ID
-        return true;
-    }
-    return false;
-}
-
 void Server::handleAccountIntegrationRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
     try {
         // Extract Authorization header from the request headers
-        std::string userId = "1"; // Default for development
+        std::string userId;
+        std::cout << "[DEBUG] Initial userId: " << userId << std::endl;
+        
+        // Accept both 'Authorization' and 'authorization' headers (case-insensitive)
         auto authIt = headers.find("Authorization");
+        if (authIt == headers.end()) {
+            authIt = headers.find("authorization");
+        }
         if (authIt != headers.end()) {
             std::string authHeader = authIt->second;
+            std::cout << "[DEBUG] Authorization header: " << authHeader << std::endl;
             if (authHeader.find("Bearer ") == 0) {
                 std::string token = authHeader.substr(7);
+                std::cout << "[DEBUG] Extracted token: " << token << std::endl;
                 int userIdInt;
                 if (userManager_->validateSessionToken(token, userIdInt)) {
                     userId = std::to_string(userIdInt);
+                    std::cout << "[DEBUG] Token validation SUCCESS for user: " << userId << std::endl;
+                } else {
+                    std::cout << "[DEBUG] Token validation FAILED for token: " << token << std::endl;
+                    response = createErrorResponse("Invalid or expired token", true);
+                    return;
                 }
+            } else {
+                std::cout << "[DEBUG] Authorization header does not start with 'Bearer '" << std::endl;
+                response = createErrorResponse("Invalid authorization header format", true);
+                return;
             }
+        } else {
+            std::cout << "[DEBUG] Authorization header not found" << std::endl;
+            response = createErrorResponse("Authorization header required", true);
+            return;
         }
         
         if (method == "GET" && path == "/integration/accounts") {
@@ -446,10 +458,21 @@ void Server::handleUserRoutes(const std::string& method, const std::string& path
 
 void Server::handleMessageRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
     try {
-        std::string userId = getAuthToken(headers);
-        if (userId.empty()) {
-            response = createErrorResponse("Unauthorized", true);
-            return;
+        // Extract user ID from Authorization header
+        std::string userId = "1"; // Default for development
+        auto authIt = headers.find("Authorization");
+        if (authIt != headers.end()) {
+            std::string authHeader = authIt->second;
+            if (authHeader.find("Bearer ") == 0) {
+                std::string token = authHeader.substr(7);
+                int userIdInt;
+                if (userManager_->validateSessionToken(token, userIdInt)) {
+                    userId = std::to_string(userIdInt);
+                } else {
+                    response = createErrorResponse("Unauthorized", true);
+                    return;
+                }
+            }
         }
         
         int userIdInt = std::stoi(userId);
@@ -514,20 +537,41 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
     std::cout << "[DEBUG] Body: " << body << std::endl;
     
     // Extract user ID from Authorization header
-    std::string userId = "1"; // Default for development
+    std::string userId;
+    std::cout << "[DEBUG] Initial userId: " << userId << std::endl;
+    
+    // Accept both 'Authorization' and 'authorization' headers (case-insensitive)
     auto authIt = headers.find("Authorization");
+    if (authIt == headers.end()) {
+        authIt = headers.find("authorization");
+    }
     if (authIt != headers.end()) {
         std::string authHeader = authIt->second;
+        std::cout << "[DEBUG] Authorization header: " << authHeader << std::endl;
         if (authHeader.find("Bearer ") == 0) {
             std::string token = authHeader.substr(7);
+            std::cout << "[DEBUG] Extracted token: " << token << std::endl;
             int userIdInt;
             if (userManager_->validateSessionToken(token, userIdInt)) {
                 userId = std::to_string(userIdInt);
+                std::cout << "[DEBUG] Token validation SUCCESS for user: " << userId << std::endl;
+            } else {
+                std::cout << "[DEBUG] Token validation FAILED for token: " << token << std::endl;
+                response = createErrorResponse("Invalid or expired token", true);
+                return;
             }
+        } else {
+            std::cout << "[DEBUG] Authorization header does not start with 'Bearer '" << std::endl;
+            response = createErrorResponse("Invalid authorization header format", true);
+            return;
         }
+    } else {
+        std::cout << "[DEBUG] Authorization header not found" << std::endl;
+        response = createErrorResponse("Authorization header required", true);
+        return;
     }
     
-    std::cout << "[DEBUG] User ID from token: " << userId << std::endl;
+    std::cout << "[DEBUG] Final User ID from token: " << userId << std::endl;
     
     try {
         int userIdInt = std::stoi(userId);
@@ -584,7 +628,9 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
         }
         else if (method == "GET" && (path == "/groups" || path == "/api/groups")) {
             // Get user's groups
+            std::cout << "[DEBUG] Getting groups for user ID: " << userIdInt << std::endl;
             auto groups = groupChat_->getUserGroups(userIdInt);
+            std::cout << "[DEBUG] Found " << groups.size() << " groups for user " << userIdInt << std::endl;
             json groupsArray = json::array();
             
             for (const auto& group : groups) {
@@ -792,7 +838,10 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
             
             std::cout << "[DEBUG] Sending group message to group " << groupId << " from user " << userIdInt << std::endl;
             
-            if (!groupChat_->isGroupMember(groupId, userIdInt)) {
+            bool isMember = groupChat_->isGroupMember(groupId, userIdInt);
+            std::cout << "[DEBUG] User " << userIdInt << " is member of group " << groupId << ": " << (isMember ? "YES" : "NO") << std::endl;
+            
+            if (!isMember) {
                 std::cout << "[DEBUG] User " << userIdInt << " is not a member of group " << groupId << std::endl;
                 response = createErrorResponse("Not a member of this group", true);
                 return;
@@ -976,13 +1025,29 @@ void Server::handleChatSessionRoutes(const std::string& method, const std::strin
         std::cout << "[DEBUG] Header: " << k << " = " << v << std::endl;
     }
     try {
-        std::string userId = getAuthToken(headers);
-        if (userId.empty()) {
-            // DEV ONLY: allow all requests as user 1
-            userId = "1";
-            // Optionally: log a warning here
+        // Extract user ID from Authorization header
+        std::string userId = "1"; // Default for development
+        auto authIt = headers.find("Authorization");
+        if (authIt != headers.end()) {
+            std::string authHeader = authIt->second;
+            if (authHeader.find("Bearer ") == 0) {
+                std::string token = authHeader.substr(7);
+                std::cout << "[DEBUG] Extracted token: " << token << std::endl;
+                int userIdInt;
+                if (userManager_->validateSessionToken(token, userIdInt)) {
+                    userId = std::to_string(userIdInt);
+                    std::cout << "[DEBUG] Token validation SUCCESS for user: " << userId << std::endl;
+                } else {
+                    std::cout << "[DEBUG] Token validation FAILED for token: " << token << std::endl;
+                    response = createErrorResponse("Invalid token", true);
+                    return;
+                }
+            }
         }
+        
         int userIdInt = std::stoi(userId);
+        std::cout << "[DEBUG] User ID from token: " << userId << std::endl;
+        
         if (method == "GET" && path == "/chat-sessions") {
             // Get user's chat sessions
             auto sessions = database_->getUserChatSessions(userIdInt);
