@@ -265,7 +265,8 @@ User Database::getUserByUsername(const std::string& username) {
 }
 
 User Database::getUserById(int id) {
-    std::lock_guard<std::mutex> lock(dbMutex_);
+    // Note: This function should not acquire dbMutex_ if called from within another function that already holds it
+    // The caller is responsible for ensuring thread safety
     
     const char* sql = "SELECT id, username, email, password_hash, public_key, created_at, is_online FROM users WHERE id = ?";
     sqlite3_stmt* stmt;
@@ -341,7 +342,9 @@ std::vector<User> Database::getAllUsers() {
 }
 
 bool Database::saveMessage(const Message& message) {
+    std::cout << "[DEBUG] saveMessage: Starting function" << std::endl;
     std::lock_guard<std::mutex> lock(dbMutex_);
+    std::cout << "[DEBUG] saveMessage: Acquired database lock" << std::endl;
     
     std::cout << "[DEBUG] saveMessage called with:" << std::endl;
     std::cout << "  sender_id: " << message.sender_id << std::endl;
@@ -352,7 +355,9 @@ bool Database::saveMessage(const Message& message) {
     std::cout << "  message_type: " << message.message_type << std::endl;
     
     // Validate sender exists
+    std::cout << "[DEBUG] saveMessage: About to validate sender" << std::endl;
     User sender = getUserById(message.sender_id);
+    std::cout << "[DEBUG] saveMessage: getUserById returned, sender.id = " << sender.id << std::endl;
     if (sender.id == 0) {
         std::cerr << "[DEBUG] Sender with ID " << message.sender_id << " does not exist" << std::endl;
         return false;
@@ -361,7 +366,9 @@ bool Database::saveMessage(const Message& message) {
     
     // Validate group exists if it's a group message
     if (message.group_id > 0) {
+        std::cout << "[DEBUG] saveMessage: About to validate group" << std::endl;
         Group group = getGroupById(message.group_id);
+        std::cout << "[DEBUG] saveMessage: getGroupById returned, group.id = " << group.id << std::endl;
         if (group.id == 0) {
             std::cerr << "[DEBUG] Group with ID " << message.group_id << " does not exist" << std::endl;
             return false;
@@ -369,7 +376,10 @@ bool Database::saveMessage(const Message& message) {
         std::cout << "[DEBUG] Group validation passed: " << group.name << std::endl;
         
         // Check if sender is a member of the group
-        if (!isGroupMember(message.group_id, message.sender_id)) {
+        std::cout << "[DEBUG] saveMessage: About to check group membership" << std::endl;
+        bool isMember = isGroupMember(message.group_id, message.sender_id);
+        std::cout << "[DEBUG] saveMessage: isGroupMember returned: " << (isMember ? "true" : "false") << std::endl;
+        if (!isMember) {
             std::cerr << "[DEBUG] User " << message.sender_id << " is not a member of group " << message.group_id << std::endl;
             return false;
         }
@@ -378,7 +388,9 @@ bool Database::saveMessage(const Message& message) {
     
     // Validate receiver exists if it's a direct message
     if (message.receiver_id > 0) {
+        std::cout << "[DEBUG] saveMessage: About to validate receiver" << std::endl;
         User receiver = getUserById(message.receiver_id);
+        std::cout << "[DEBUG] saveMessage: getUserById for receiver returned, receiver.id = " << receiver.id << std::endl;
         if (receiver.id == 0) {
             std::cerr << "[DEBUG] Receiver with ID " << message.receiver_id << " does not exist" << std::endl;
             return false;
@@ -386,16 +398,29 @@ bool Database::saveMessage(const Message& message) {
         std::cout << "[DEBUG] Receiver validation passed: " << receiver.username << std::endl;
     }
     
+    std::cout << "[DEBUG] saveMessage: About to prepare SQL statement" << std::endl;
     const char* sql = "INSERT INTO messages (sender_id, receiver_id, group_id, content, encrypted_content, message_type, file_name, file_path, file_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
     sqlite3_stmt* stmt;
     
-    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+    std::cout << "[DEBUG] saveMessage: Calling sqlite3_prepare_v2" << std::endl;
+    int prep_result = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+    std::cout << "[DEBUG] saveMessage: sqlite3_prepare_v2 returned: " << prep_result << std::endl;
+    if (prep_result != SQLITE_OK) {
         std::cerr << "[DEBUG] Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
         return false;
     }
+    std::cout << "[DEBUG] saveMessage: SQL statement prepared successfully" << std::endl;
     
+    std::cout << "[DEBUG] saveMessage: About to bind parameters" << std::endl;
     sqlite3_bind_int(stmt, 1, message.sender_id);
-    sqlite3_bind_int(stmt, 2, message.receiver_id);
+    
+    // Handle NULL values for receiver_id when it's 0
+    if (message.receiver_id > 0) {
+        sqlite3_bind_int(stmt, 2, message.receiver_id);
+    } else {
+        sqlite3_bind_null(stmt, 2);
+    }
+    
     sqlite3_bind_int(stmt, 3, message.group_id);
     sqlite3_bind_text(stmt, 4, message.content.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 5, message.encrypted_content.c_str(), -1, SQLITE_STATIC);
@@ -403,15 +428,22 @@ bool Database::saveMessage(const Message& message) {
     sqlite3_bind_text(stmt, 7, message.file_name.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 8, message.file_path.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_int(stmt, 9, message.file_size);
+    std::cout << "[DEBUG] saveMessage: Parameters bound successfully" << std::endl;
     
+    std::cout << "[DEBUG] saveMessage: About to execute sqlite3_step" << std::endl;
     int rc = sqlite3_step(stmt);
+    std::cout << "[DEBUG] saveMessage: sqlite3_step returned: " << rc << std::endl;
     if (rc != SQLITE_DONE) {
         std::cerr << "[DEBUG] sqlite3_step failed with code " << rc << ": " << sqlite3_errmsg(db_) << std::endl;
     }
+    
+    std::cout << "[DEBUG] saveMessage: About to finalize statement" << std::endl;
     sqlite3_finalize(stmt);
+    std::cout << "[DEBUG] saveMessage: Statement finalized" << std::endl;
     
     bool success = (rc == SQLITE_DONE);
     std::cout << "[DEBUG] saveMessage result: " << (success ? "SUCCESS" : "FAILED") << std::endl;
+    std::cout << "[DEBUG] saveMessage: Function ending" << std::endl;
     return success;
 }
 
@@ -753,7 +785,8 @@ std::string Database::decryptData(const std::string& encryptedData) {
 
 // Group management methods
 Group Database::getGroupById(int groupId) {
-    std::lock_guard<std::mutex> lock(dbMutex_);
+    // Note: This function should not acquire dbMutex_ if called from within another function that already holds it
+    // The caller is responsible for ensuring thread safety
     
     const char* sql = "SELECT id, name, description, creator_id, created_at FROM groups WHERE id = ?";
     sqlite3_stmt* stmt;
@@ -878,7 +911,8 @@ bool Database::deleteGroup(int groupId) {
 }
 
 bool Database::isGroupMember(int groupId, int userId) {
-    std::lock_guard<std::mutex> lock(dbMutex_);
+    // Note: This function should not acquire dbMutex_ if called from within another function that already holds it
+    // The caller is responsible for ensuring thread safety
     
     const char* sql = "SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ?";
     sqlite3_stmt* stmt;
