@@ -23,7 +23,9 @@ using json = nlohmann::json;
 Server::Server(int port) : port_(port), running_(false), database_(std::make_shared<Database>()), 
                           userManager_(std::make_shared<UserManager>(database_)),
                           messageHandler_(std::make_shared<MessageHandler>(database_, userManager_)),
-                          wsHandler_(std::make_shared<WebSocketHandler>(messageHandler_, userManager_)) {
+                          groupChat_(std::make_shared<GroupChat>(database_)),
+                          wsHandler_(std::make_shared<WebSocketHandler>(messageHandler_, userManager_, this)),
+                          serverSocket_(-1) {
     setupRoutes();
 }
 
@@ -49,6 +51,16 @@ void Server::setupRoutes() {
     };
     routes["/groups"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
         handleGroupRoutes(method, path, body, response);
+    };
+    
+    // Chat sessions routes
+    routes["/chat-sessions"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleChatSessionRoutes(method, path, body, response);
+    };
+    
+    // Backup routes
+    routes["/backup"] = [this](const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+        handleBackupRoutes(method, path, body, response);
     };
     
     // Account integration routes
@@ -248,58 +260,86 @@ bool Server::validateToken(const std::string& token, std::string& userId) {
 
 void Server::handleAccountIntegrationRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
     try {
-        // Parse headers from the request (this would need to be passed from the calling method)
+        // Extract Authorization header from the request headers
         std::map<std::string, std::string> headers;
-        // TODO: Extract headers from the actual request
+        // Parse headers from body if available (for WebSocket HTTP routing)
+        size_t headerStart = body.find("Authorization:");
+        std::string userId;
+        if (headerStart != std::string::npos) {
+            size_t valueStart = headerStart + std::string("Authorization:").length();
+            size_t valueEnd = body.find('\n', valueStart);
+            std::string authHeader = body.substr(valueStart, valueEnd - valueStart);
+            authHeader.erase(0, authHeader.find_first_not_of(" \t\r\n"));
+            if (authHeader.rfind("Bearer ", 0) == 0) {
+                std::string token = authHeader.substr(7);
+                userId = std::to_string(database_->getUserIdFromSession(token));
+            }
+        } else {
+            // Fallback: try to get from headers map (for direct HTTP)
+            userId = getAuthToken(headers);
+        }
+        if (userId.empty() || userId == "-1") {
+            response = createErrorResponse("Unauthorized");
+            return;
+        }
         
         if (method == "GET" && path == "/integration/accounts") {
             // Get user's connected accounts
-            std::string userId = getAuthToken(headers);
-            if (userId.empty()) {
-                response = createErrorResponse("Unauthorized");
-                return;
-            }
-            
             auto accounts = accountManager.getUserAccounts(userId);
             json accountsArray = json::array();
             
             for (const auto& account : accounts) {
                 json accountJson;
                 accountJson["id"] = account.id;
-                accountJson["type"] = (account.type == AccountType::EMAIL) ? "email" : "messenger";
-                accountJson["provider"] = [&account]() {
-                    switch (account.provider) {
-                        case ProviderType::GMAIL: return "Gmail";
-                        case ProviderType::OUTLOOK: return "Outlook";
-                        case ProviderType::YAHOO_MAIL: return "Yahoo Mail";
-                        case ProviderType::PROTONMAIL: return "ProtonMail";
-                        case ProviderType::WHATSAPP: return "WhatsApp";
-                        case ProviderType::TELEGRAM: return "Telegram";
-                        case ProviderType::FACEBOOK_MESSENGER: return "Facebook Messenger";
-                        case ProviderType::TWITTER_DM: return "Twitter DM";
-                        case ProviderType::INSTAGRAM_DM: return "Instagram DM";
-                        default: return "Unknown";
-                    }
-                }();
+                accountJson["type"] = static_cast<int>(account.type);
+                accountJson["provider"] = static_cast<int>(account.provider);
                 accountJson["email"] = account.email;
                 accountJson["username"] = account.username;
                 accountJson["isActive"] = account.isActive;
                 accountJson["lastSync"] = std::chrono::duration_cast<std::chrono::seconds>(
                     account.lastSync.time_since_epoch()).count();
+                accountJson["createdAt"] = std::chrono::duration_cast<std::chrono::seconds>(
+                    account.createdAt.time_since_epoch()).count();
                 
                 accountsArray.push_back(accountJson);
             }
             
             response = createJSONResponse(true, "Accounts retrieved successfully", accountsArray.dump());
         }
-        else if (method == "POST" && path == "/integration/connect/gmail") {
-            // Connect Gmail account
-            std::string userId = getAuthToken(headers);
-            if (userId.empty()) {
-                response = createErrorResponse("Unauthorized");
-                return;
+        else if (method == "GET" && path == "/integration/messages") {
+            // Get unified messages from all connected accounts
+            auto messages = accountManager.fetchNewMessages(userId);
+            json messagesArray = json::array();
+            
+            for (const auto& message : messages) {
+                json messageJson;
+                messageJson["id"] = message.id;
+                messageJson["accountId"] = message.accountId;
+                messageJson["sender"] = message.sender;
+                messageJson["recipient"] = message.recipient;
+                messageJson["subject"] = message.subject;
+                messageJson["content"] = message.content;
+                messageJson["messageType"] = message.messageType;
+                messageJson["timestamp"] = std::chrono::duration_cast<std::chrono::seconds>(
+                    message.timestamp.time_since_epoch()).count();
+                messageJson["isRead"] = message.isRead;
+                messageJson["isImportant"] = message.isImportant;
+                messageJson["attachments"] = json::array();
+                for (const auto& attachment : message.attachments) {
+                    messageJson["attachments"].push_back(attachment);
+                }
+                messageJson["metadata"] = json::object();
+                for (const auto& [key, value] : message.metadata) {
+                    messageJson["metadata"][key] = value;
+                }
+                
+                messagesArray.push_back(messageJson);
             }
             
+            response = createJSONResponse(true, "Messages retrieved successfully", messagesArray.dump());
+        }
+        else if (method == "POST" && path == "/integration/connect/gmail") {
+            // Connect Gmail account
             json requestJson = json::parse(body);
             std::string email = requestJson["email"];
             std::string password = requestJson["password"];
@@ -321,12 +361,6 @@ void Server::handleAccountIntegrationRoutes(const std::string& method, const std
         }
         else if (method == "POST" && path == "/integration/connect/gmail/oauth2") {
             // Complete Gmail OAuth2 connection using authorization code
-            std::string userId = getAuthToken(headers);
-            if (userId.empty()) {
-                response = createErrorResponse("Unauthorized");
-                return;
-            }
-
             json requestJson = json::parse(body);
             std::string email = requestJson["email"];
             std::string code = requestJson["code"];
@@ -347,12 +381,6 @@ void Server::handleAccountIntegrationRoutes(const std::string& method, const std
         }
         else if (method == "POST" && path == "/integration/connect/whatsapp") {
             // Connect WhatsApp account
-            std::string userId = getAuthToken(headers);
-            if (userId.empty()) {
-                response = createErrorResponse("Unauthorized");
-                return;
-            }
-            
             json requestJson = json::parse(body);
             std::string phoneNumber = requestJson["phoneNumber"];
             std::string password = requestJson["password"];
@@ -365,45 +393,22 @@ void Server::handleAccountIntegrationRoutes(const std::string& method, const std
                 response = createErrorResponse("Failed to connect WhatsApp account");
             }
         }
-        else if (method == "GET" && path == "/integration/messages") {
-            // Get unified messages
-            std::string userId = getAuthToken(headers);
-            if (userId.empty()) {
-                response = createErrorResponse("Unauthorized");
-                return;
+        else if (method == "POST" && path == "/integration/connect/telegram") {
+            // Connect Telegram account
+            json requestJson = json::parse(body);
+            std::string phoneNumber = requestJson["phoneNumber"];
+            std::string code = requestJson["code"];
+            
+            bool success = accountManager.connectTelegram(userId, phoneNumber, code);
+            
+            if (success) {
+                response = createJSONResponse(true, "Telegram account connected successfully");
+            } else {
+                response = createErrorResponse("Failed to connect Telegram account");
             }
-            
-            auto messages = accountManager.fetchNewMessages(userId);
-            json messagesArray = json::array();
-            
-            for (const auto& message : messages) {
-                json messageJson;
-                messageJson["id"] = message.id;
-                messageJson["accountId"] = message.accountId;
-                messageJson["sender"] = message.sender;
-                messageJson["recipient"] = message.recipient;
-                messageJson["subject"] = message.subject;
-                messageJson["content"] = message.content;
-                messageJson["messageType"] = message.messageType;
-                messageJson["timestamp"] = std::chrono::duration_cast<std::chrono::seconds>(
-                    message.timestamp.time_since_epoch()).count();
-                messageJson["isRead"] = message.isRead;
-                messageJson["isImportant"] = message.isImportant;
-                messageJson["attachments"] = message.attachments;
-                
-                messagesArray.push_back(messageJson);
-            }
-            
-            response = createJSONResponse(true, "Messages retrieved successfully", messagesArray.dump());
         }
         else if (method == "POST" && path == "/integration/sync") {
             // Manual sync trigger
-            std::string userId = getAuthToken(headers);
-            if (userId.empty()) {
-                response = createErrorResponse("Unauthorized");
-                return;
-            }
-            
             json requestJson = json::parse(body);
             std::string accountId = requestJson["accountId"];
             
@@ -432,9 +437,538 @@ void Server::handleUserRoutes(const std::string& method, const std::string& path
 }
 
 void Server::handleMessageRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-    response = createErrorResponse("Not implemented");
+    try {
+        std::map<std::string, std::string> headers;
+        std::string userId = getAuthToken(headers);
+        if (userId.empty()) {
+            response = createErrorResponse("Unauthorized");
+            return;
+        }
+        
+        int userIdInt = std::stoi(userId);
+        
+        if (method == "GET" && path.find("/messages/") == 0) {
+            // Get messages for a chat session
+            size_t sessionIdStart = path.find("/messages/") + 10;
+            int sessionId = std::stoi(path.substr(sessionIdStart));
+            
+            auto messages = database_->getMessages(userIdInt, sessionId, 50);
+            json messagesArray = json::array();
+            
+            for (const auto& msg : messages) {
+                json messageJson;
+                messageJson["id"] = msg.id;
+                messageJson["content"] = msg.content;
+                messageJson["sender_id"] = msg.sender_id;
+                messageJson["timestamp"] = msg.timestamp;
+                messageJson["is_read"] = msg.is_read;
+                messageJson["message_type"] = msg.message_type;
+                
+                messagesArray.push_back(messageJson);
+            }
+            
+            response = createJSONResponse(true, "Messages retrieved successfully", messagesArray.dump());
+        }
+        else if (method == "POST" && path.find("/messages/") == 0) {
+            // Send a message
+            size_t sessionIdStart = path.find("/messages/") + 10;
+            int sessionId = std::stoi(path.substr(sessionIdStart));
+            
+            json requestJson = json::parse(body);
+            std::string content = requestJson["content"];
+            std::string messageType = requestJson.value("type", "text");
+            
+            Message message;
+            message.sender_id = userIdInt;
+            message.receiver_id = sessionId;
+            message.content = content;
+            message.message_type = messageType;
+            
+            bool success = database_->saveMessage(message);
+            
+            if (success) {
+                response = createJSONResponse(true, "Message sent successfully");
+            } else {
+                response = createErrorResponse("Failed to send message");
+            }
+        }
+        else {
+            response = createErrorResponse("Method not allowed");
+        }
+    } catch (const std::exception& e) {
+        response = createErrorResponse("Internal server error: " + std::string(e.what()));
+    }
 }
 
 void Server::handleGroupRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
-    response = createErrorResponse("Not implemented");
+    try {
+        // Extract Authorization header from the request headers
+        std::map<std::string, std::string> headers;
+        // Parse headers from body if available (for WebSocket HTTP routing)
+        size_t headerStart = body.find("Authorization:");
+        std::string userId;
+        if (headerStart != std::string::npos) {
+            size_t valueStart = headerStart + std::string("Authorization:").length();
+            size_t valueEnd = body.find('\n', valueStart);
+            std::string authHeader = body.substr(valueStart, valueEnd - valueStart);
+            authHeader.erase(0, authHeader.find_first_not_of(" \t\r\n"));
+            if (authHeader.rfind("Bearer ", 0) == 0) {
+                std::string token = authHeader.substr(7);
+                userId = std::to_string(database_->getUserIdFromSession(token));
+            }
+        } else {
+            // Fallback: try to get from headers map (for direct HTTP)
+            userId = getAuthToken(headers);
+        }
+        if (userId.empty() || userId == "-1") {
+            response = createErrorResponse("Unauthorized");
+            return;
+        }
+        int userIdInt = std::stoi(userId);
+        
+        if (method == "POST" && path == "/groups") {
+            // Create new group
+            json requestJson = json::parse(body);
+            std::string name = requestJson["name"];
+            std::string description = requestJson["description"];
+            
+            bool success = groupChat_->createGroup(name, description, userIdInt);
+            
+            if (success) {
+                response = createJSONResponse(true, "Group created successfully");
+            } else {
+                response = createErrorResponse("Failed to create group");
+            }
+        }
+        else if (method == "GET" && path == "/groups") {
+            // Get user's groups
+            auto groups = groupChat_->getUserGroups(userIdInt);
+            json groupsArray = json::array();
+            
+            for (const auto& group : groups) {
+                json groupJson;
+                groupJson["id"] = group.id;
+                groupJson["name"] = group.name;
+                groupJson["description"] = group.description;
+                groupJson["creator_id"] = group.creator_id;
+                groupJson["created_at"] = group.created_at;
+                groupJson["is_admin"] = groupChat_->isGroupAdmin(group.id, userIdInt);
+                
+                groupsArray.push_back(groupJson);
+            }
+            
+            response = createJSONResponse(true, "Groups retrieved successfully", groupsArray.dump());
+        }
+        else if (method == "GET" && path.find("/groups/") == 0 && path.find("/members") != std::string::npos) {
+            // Get group members
+            size_t groupIdStart = path.find("/groups/") + 8;
+            size_t groupIdEnd = path.find("/members");
+            int groupId = std::stoi(path.substr(groupIdStart, groupIdEnd - groupIdStart));
+            
+            if (!groupChat_->isGroupMember(groupId, userIdInt)) {
+                response = createErrorResponse("Not a member of this group");
+                return;
+            }
+            
+            auto members = groupChat_->getGroupMembers(groupId);
+            json membersArray = json::array();
+            
+            for (const auto& member : members) {
+                json memberJson;
+                memberJson["id"] = member.id;
+                memberJson["username"] = member.username;
+                memberJson["email"] = member.email;
+                memberJson["is_online"] = member.is_online;
+                
+                membersArray.push_back(memberJson);
+            }
+            
+            response = createJSONResponse(true, "Group members retrieved successfully", membersArray.dump());
+        }
+        else if (method == "GET" && path.find("/groups/") == 0 && path.find("/members") == std::string::npos && path.find("/messages") == std::string::npos) {
+            // Get group info
+            size_t groupIdStart = path.find("/groups/") + 8;
+            int groupId = std::stoi(path.substr(groupIdStart));
+            
+            if (!groupChat_->isGroupMember(groupId, userIdInt)) {
+                response = createErrorResponse("Not a member of this group");
+                return;
+            }
+            
+            Group group = groupChat_->getGroupById(groupId);
+            if (group.id == 0) {
+                response = createErrorResponse("Group not found");
+                return;
+            }
+            
+            json groupJson;
+            groupJson["id"] = group.id;
+            groupJson["name"] = group.name;
+            groupJson["description"] = group.description;
+            groupJson["creator_id"] = group.creator_id;
+            groupJson["created_at"] = group.created_at;
+            groupJson["is_admin"] = groupChat_->isGroupAdmin(groupId, userIdInt);
+            
+            response = createJSONResponse(true, "Group info retrieved successfully", groupJson.dump());
+        }
+        else if (method == "POST" && path.find("/groups/") == 0 && path.find("/members") != std::string::npos) {
+            // Add member to group
+            size_t groupIdStart = path.find("/groups/") + 8;
+            size_t groupIdEnd = path.find("/members");
+            int groupId = std::stoi(path.substr(groupIdStart, groupIdEnd - groupIdStart));
+            
+            if (!groupChat_->isGroupAdmin(groupId, userIdInt)) {
+                response = createErrorResponse("Not an admin of this group");
+                return;
+            }
+            
+            json requestJson = json::parse(body);
+            int memberId = requestJson["user_id"];
+            std::string role = requestJson.value("role", "member");
+            
+            bool success = groupChat_->addMember(groupId, memberId, role);
+            
+            if (success) {
+                response = createJSONResponse(true, "Member added successfully");
+            } else {
+                response = createErrorResponse("Failed to add member");
+            }
+        }
+        else if (method == "DELETE" && path.find("/groups/") == 0 && path.find("/members/") != std::string::npos) {
+            // Remove member from group
+            size_t groupIdStart = path.find("/groups/") + 8;
+            size_t groupIdEnd = path.find("/members/");
+            int groupId = std::stoi(path.substr(groupIdStart, groupIdEnd - groupIdStart));
+            
+            size_t memberIdStart = groupIdEnd + 9;
+            int memberId = std::stoi(path.substr(memberIdStart));
+            
+            if (!groupChat_->isGroupAdmin(groupId, userIdInt)) {
+                response = createErrorResponse("Not an admin of this group");
+                return;
+            }
+            
+            bool success = groupChat_->removeMember(groupId, memberId, userIdInt);
+            
+            if (success) {
+                response = createJSONResponse(true, "Member removed successfully");
+            } else {
+                response = createErrorResponse("Failed to remove member");
+            }
+        }
+        else if (method == "PUT" && path.find("/groups/") == 0) {
+            // Update group
+            size_t groupIdStart = path.find("/groups/") + 8;
+            int groupId = std::stoi(path.substr(groupIdStart));
+            
+            if (!groupChat_->isGroupAdmin(groupId, userIdInt)) {
+                response = createErrorResponse("Not an admin of this group");
+                return;
+            }
+            
+            json requestJson = json::parse(body);
+            std::string name = requestJson["name"];
+            std::string description = requestJson["description"];
+            
+            bool success = groupChat_->updateGroup(groupId, name, description, userIdInt);
+            
+            if (success) {
+                response = createJSONResponse(true, "Group updated successfully");
+            } else {
+                response = createErrorResponse("Failed to update group");
+            }
+        }
+        else if (method == "DELETE" && path.find("/groups/") == 0) {
+            // Delete group
+            size_t groupIdStart = path.find("/groups/") + 8;
+            int groupId = std::stoi(path.substr(groupIdStart));
+            
+            if (!groupChat_->isGroupAdmin(groupId, userIdInt)) {
+                response = createErrorResponse("Not an admin of this group");
+                return;
+            }
+            
+            bool success = groupChat_->deleteGroup(groupId, userIdInt);
+            
+            if (success) {
+                response = createJSONResponse(true, "Group deleted successfully");
+            } else {
+                response = createErrorResponse("Failed to delete group");
+            }
+        }
+        else if (method == "GET" && path.find("/groups/") == 0 && path.find("/messages") != std::string::npos) {
+            // Get group messages
+            size_t groupIdStart = path.find("/groups/") + 8;
+            size_t groupIdEnd = path.find("/messages");
+            int groupId = std::stoi(path.substr(groupIdStart, groupIdEnd - groupIdStart));
+            
+            if (!groupChat_->isGroupMember(groupId, userIdInt)) {
+                response = createErrorResponse("Not a member of this group");
+                return;
+            }
+            
+            auto messages = database_->getGroupMessages(groupId, 50);
+            json messagesArray = json::array();
+            
+            for (const auto& msg : messages) {
+                json messageJson;
+                messageJson["id"] = msg.id;
+                messageJson["content"] = msg.content;
+                messageJson["sender_id"] = msg.sender_id;
+                messageJson["timestamp"] = msg.timestamp;
+                messageJson["is_read"] = msg.is_read;
+                messageJson["message_type"] = msg.message_type;
+                
+                // Get sender name
+                User sender = database_->getUserById(msg.sender_id);
+                messageJson["sender_name"] = sender.username;
+                
+                messagesArray.push_back(messageJson);
+            }
+            
+            response = createJSONResponse(true, "Group messages retrieved successfully", messagesArray.dump());
+        }
+        else if (method == "POST" && path.find("/groups/") == 0 && path.find("/messages") != std::string::npos) {
+            // Send group message
+            size_t groupIdStart = path.find("/groups/") + 8;
+            size_t groupIdEnd = path.find("/messages");
+            int groupId = std::stoi(path.substr(groupIdStart, groupIdEnd - groupIdStart));
+            
+            if (!groupChat_->isGroupMember(groupId, userIdInt)) {
+                response = createErrorResponse("Not a member of this group");
+                return;
+            }
+            
+            json requestJson = json::parse(body);
+            std::string content = requestJson["content"];
+            std::string messageType = requestJson.value("type", "text");
+            
+            Message message;
+            message.sender_id = userIdInt;
+            message.group_id = groupId;
+            message.content = content;
+            message.message_type = messageType;
+            
+            bool success = database_->saveMessage(message);
+            
+            if (success) {
+                response = createJSONResponse(true, "Group message sent successfully");
+            } else {
+                response = createErrorResponse("Failed to send group message");
+            }
+        }
+        else {
+            response = createErrorResponse("Method not allowed");
+        }
+    } catch (const std::exception& e) {
+        response = createErrorResponse("Internal server error: " + std::string(e.what()));
+    }
+}
+
+void Server::handleBackupRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+    try {
+        std::map<std::string, std::string> headers;
+        std::string userId = getAuthToken(headers);
+        if (userId.empty()) {
+            response = createErrorResponse("Unauthorized");
+            return;
+        }
+        
+        int userIdInt = std::stoi(userId);
+        
+        if (method == "POST" && path == "/backup") {
+            // Create chat backup
+            json requestJson = json::parse(body);
+            std::string backupName = requestJson["name"];
+            std::string backupData = requestJson["data"];
+            std::string description = requestJson.value("description", "");
+            
+            bool success = database_->createChatBackup(userIdInt, backupName, backupData, description);
+            
+            if (success) {
+                response = createJSONResponse(true, "Backup created successfully");
+            } else {
+                response = createErrorResponse("Failed to create backup");
+            }
+        }
+        else if (method == "GET" && path == "/backup") {
+            // Get user's backups
+            auto backups = database_->getUserBackups(userIdInt);
+            json backupsArray = json::array();
+            
+            for (const auto& backup : backups) {
+                json backupJson;
+                backupJson["id"] = backup.id;
+                backupJson["name"] = backup.backup_name;
+                backupJson["description"] = backup.description;
+                backupJson["created_at"] = backup.created_at;
+                backupJson["size"] = backup.backup_data.length();
+                
+                backupsArray.push_back(backupJson);
+            }
+            
+            response = createJSONResponse(true, "Backups retrieved successfully", backupsArray.dump());
+        }
+        else if (method == "GET" && path.find("/backup/") == 0) {
+            // Get specific backup
+            size_t backupIdStart = path.find("/backup/") + 8;
+            int backupId = std::stoi(path.substr(backupIdStart));
+            
+            auto backup = database_->getBackupById(backupId);
+            if (backup.id == 0 || backup.user_id != userIdInt) {
+                response = createErrorResponse("Backup not found");
+                return;
+            }
+            
+            json backupJson;
+            backupJson["id"] = backup.id;
+            backupJson["name"] = backup.backup_name;
+            backupJson["description"] = backup.description;
+            backupJson["created_at"] = backup.created_at;
+            backupJson["data"] = backup.backup_data;
+            
+            response = createJSONResponse(true, "Backup retrieved successfully", backupJson.dump());
+        }
+        else if (method == "POST" && path.find("/backup/") == 0 && path.find("/restore") != std::string::npos) {
+            // Restore from backup
+            size_t backupIdStart = path.find("/backup/") + 8;
+            size_t backupIdEnd = path.find("/restore");
+            int backupId = std::stoi(path.substr(backupIdStart, backupIdEnd - backupIdStart));
+            
+            bool success = database_->restoreFromBackup(backupId, userIdInt);
+            
+            if (success) {
+                response = createJSONResponse(true, "Backup restored successfully");
+            } else {
+                response = createErrorResponse("Failed to restore backup");
+            }
+        }
+        else if (method == "DELETE" && path.find("/backup/") == 0) {
+            // Delete backup
+            size_t backupIdStart = path.find("/backup/") + 8;
+            int backupId = std::stoi(path.substr(backupIdStart));
+            
+            bool success = database_->deleteBackup(backupId, userIdInt);
+            
+            if (success) {
+                response = createJSONResponse(true, "Backup deleted successfully");
+            } else {
+                response = createErrorResponse("Failed to delete backup");
+            }
+        }
+        else {
+            response = createErrorResponse("Method not allowed");
+        }
+    } catch (const std::exception& e) {
+        response = createErrorResponse("Internal server error: " + std::string(e.what()));
+    }
+}
+
+void Server::handleChatSessionRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response) {
+    try {
+        std::map<std::string, std::string> headers;
+        std::string userId = getAuthToken(headers);
+        if (userId.empty()) {
+            response = createErrorResponse("Unauthorized");
+            return;
+        }
+        
+        int userIdInt = std::stoi(userId);
+        
+        if (method == "GET" && path == "/chat-sessions") {
+            // Get user's chat sessions
+            auto sessions = database_->getUserChatSessions(userIdInt);
+            json sessionsArray = json::array();
+            
+            for (const auto& session : sessions) {
+                json sessionJson;
+                sessionJson["id"] = session.id;
+                sessionJson["other_user_id"] = session.other_user_id;
+                sessionJson["group_id"] = session.group_id;
+                sessionJson["last_message"] = session.last_message;
+                sessionJson["last_timestamp"] = session.last_timestamp;
+                sessionJson["unread_count"] = session.unread_count;
+                sessionJson["updated_at"] = session.updated_at;
+                
+                // Get user info for other_user_id
+                if (session.other_user_id > 0) {
+                    User otherUser = database_->getUserById(session.other_user_id);
+                    sessionJson["other_user_name"] = otherUser.username;
+                }
+                
+                sessionsArray.push_back(sessionJson);
+            }
+            
+            response = createJSONResponse(true, "Chat sessions retrieved successfully", sessionsArray.dump());
+        }
+        else {
+            response = createErrorResponse("Method not allowed");
+        }
+    } catch (const std::exception& e) {
+        response = createErrorResponse("Internal server error: " + std::string(e.what()));
+    }
+}
+
+void Server::parseRequest(const std::string& request, std::string& method, std::string& path, std::map<std::string, std::string>& headers, std::string& body) {
+    std::istringstream requestStream(request);
+    std::string line;
+    
+    // Parse request line
+    if (std::getline(requestStream, line)) {
+        std::istringstream lineStream(line);
+        lineStream >> method >> path;
+    }
+    
+    // Parse headers
+    while (std::getline(requestStream, line) && line != "\r" && !line.empty()) {
+        size_t colonPos = line.find(':');
+        if (colonPos != std::string::npos) {
+            std::string key = line.substr(0, colonPos);
+            std::string value = line.substr(colonPos + 1);
+            
+            // Trim whitespace
+            key.erase(0, key.find_first_not_of(" \t\r\n"));
+            key.erase(key.find_last_not_of(" \t\r\n") + 1);
+            value.erase(0, value.find_first_not_of(" \t\r\n"));
+            value.erase(value.find_last_not_of(" \t\r\n") + 1);
+            
+            headers[key] = value;
+        }
+    }
+    
+    // Get body
+    std::stringstream bodyStream;
+    while (std::getline(requestStream, line)) {
+        bodyStream << line << "\n";
+    }
+    body = bodyStream.str();
+    
+    // Remove trailing newline
+    if (!body.empty() && body.back() == '\n') {
+        body.pop_back();
+    }
+}
+
+void Server::handleRequest(const std::string& request, std::string& response) {
+    try {
+        std::string method, path;
+        std::map<std::string, std::string> headers;
+        std::string body;
+        
+        parseRequest(request, method, path, headers, body);
+        
+        // Find the route handler
+        auto routeIt = routes.find(path);
+        if (routeIt != routes.end()) {
+            routeIt->second(method, path, body, response);
+        } else {
+            response = createErrorResponse("Route not found");
+        }
+        
+        // Add CORS headers
+        addCORSHeaders(response);
+        
+    } catch (const std::exception& e) {
+        response = createErrorResponse("Internal server error: " + std::string(e.what()));
+    }
 } 

@@ -14,6 +14,7 @@
 
 class MessageHandler;
 class UserManager;
+class Server;
 
 struct WebSocketFrame {
     bool fin;
@@ -41,7 +42,8 @@ struct WebSocketConnection {
 class WebSocketHandler {
 public:
     WebSocketHandler(std::shared_ptr<MessageHandler> msgHandler, 
-                    std::shared_ptr<UserManager> userManager);
+                    std::shared_ptr<UserManager> userManager,
+                    Server* server = nullptr);
     ~WebSocketHandler();
 
     void handleConnection(int clientSocket, const std::string& remoteAddress);
@@ -64,6 +66,7 @@ public:
 private:
     std::shared_ptr<MessageHandler> messageHandler_;
     std::shared_ptr<UserManager> userManager_;
+    Server* server_; // Reference to server for HTTP routing
     
     // Connection tracking
     std::map<int, std::shared_ptr<WebSocketConnection>> connections_;
@@ -92,5 +95,6 @@ private:
     void handleRegister(std::shared_ptr<WebSocketConnection> conn, const std::string& request);
     void handleLogin(std::shared_ptr<WebSocketConnection> conn, const std::string& request);
     void handleCorsPreflight(std::shared_ptr<WebSocketConnection> conn);
+    void handleHttpRequest(std::shared_ptr<WebSocketConnection> conn, const std::string& method, const std::string& path, const std::string& request);
     void sendErrorResponse(std::shared_ptr<WebSocketConnection> conn, int statusCode, const std::string& message);
 }; 

@@ -43,6 +43,26 @@ struct GroupMember {
     std::string joined_at;
 };
 
+struct ChatBackup {
+    int id;
+    int user_id;
+    std::string backup_name;
+    std::string backup_data; // JSON string containing chat data
+    std::string created_at;
+    std::string description;
+};
+
+struct ChatSession {
+    int id;
+    int user_id;
+    int other_user_id; // For direct messages
+    int group_id;      // For group chats
+    std::string last_message;
+    std::string last_timestamp;
+    int unread_count;
+    std::string updated_at;
+};
+
 class Database {
 public:
     Database(const std::string& dbPath = "cockpit.db");
@@ -72,6 +92,27 @@ public:
     bool removeUserFromGroup(int groupId, int userId);
     std::vector<Group> getUserGroups(int userId);
     std::vector<User> getGroupMembers(int groupId);
+    Group getGroupById(int groupId);
+    bool updateGroup(int groupId, const std::string& name, const std::string& description);
+    bool deleteGroup(int groupId);
+    bool isGroupMember(int groupId, int userId);
+    bool isGroupAdmin(int groupId, int userId);
+    bool updateMemberRole(int groupId, int userId, const std::string& role);
+
+    // Chat session operations
+    bool createOrUpdateChatSession(int userId, int otherUserId, int groupId, 
+                                  const std::string& lastMessage, int unreadCount = 0);
+    std::vector<ChatSession> getUserChatSessions(int userId);
+    bool updateChatSessionUnreadCount(int sessionId, int unreadCount);
+    bool deleteChatSession(int sessionId);
+
+    // Backup operations
+    bool createChatBackup(int userId, const std::string& backupName, 
+                         const std::string& backupData, const std::string& description = "");
+    std::vector<ChatBackup> getUserBackups(int userId);
+    ChatBackup getBackupById(int backupId);
+    bool deleteBackup(int backupId, int userId);
+    bool restoreFromBackup(int backupId, int userId);
 
     // Session management
     bool saveSession(const std::string& token, int userId, const std::string& expiresAt);

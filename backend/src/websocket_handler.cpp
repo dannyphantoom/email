@@ -1,15 +1,20 @@
 #include "websocket_handler.h"
+#include "message_handler.h"
+#include "user_manager.h"
+#include "server.h"
 #include <iostream>
 #include <sstream>
 #include <cstring>
+#include <sys/select.h>
 #include <openssl/sha.h>
 #include <openssl/bio.h>
-#include <openssl/buffer.h>
 #include <openssl/evp.h>
+#include <openssl/buffer.h>
 
 WebSocketHandler::WebSocketHandler(std::shared_ptr<MessageHandler> msgHandler, 
-                                 std::shared_ptr<UserManager> userManager)
-    : messageHandler_(msgHandler), userManager_(userManager) {
+                                 std::shared_ptr<UserManager> userManager,
+                                 Server* server)
+    : messageHandler_(msgHandler), userManager_(userManager), server_(server) {
 }
 
 WebSocketHandler::~WebSocketHandler() {
@@ -160,16 +165,8 @@ void WebSocketHandler::handleClient(std::shared_ptr<WebSocketConnection> conn) {
             ::close(conn->socket);
             return;
         } else {
-            // 404 Not Found
-            std::string response = "HTTP/1.1 404 Not Found\r\n";
-            response += "Content-Type: text/plain\r\n";
-            response += "Content-Length: 13\r\n";
-            response += "Connection: close\r\n";
-            response += "\r\n";
-            response += "Not Found";
-            send(conn->socket, response.c_str(), response.length(), 0);
-            ::close(conn->socket);
-            return;
+            // Route to server's HTTP handlers
+            handleHttpRequest(conn, method, path, request);
         }
         
     } catch (const std::exception& e) {
@@ -531,5 +528,71 @@ std::string WebSocketHandler::base64Encode(const std::string& data) {
 }
 
 uint16_t WebSocketHandler::htons(uint16_t hostshort) {
-    return ((hostshort & 0xFF) << 8) | ((hostshort >> 8) & 0xFF);
+    return ::htons(hostshort);
+}
+
+void WebSocketHandler::handleHttpRequest(std::shared_ptr<WebSocketConnection> conn, const std::string& method, const std::string& path, const std::string& request) {
+    if (!server_) {
+        // If no server reference, return 404
+        sendErrorResponse(conn, 404, "Not Found");
+        return;
+    }
+    
+    try {
+        // Extract headers and body from request
+        std::map<std::string, std::string> headers;
+        std::string body;
+        
+        size_t headerEnd = request.find("\r\n\r\n");
+        if (headerEnd != std::string::npos) {
+            std::string headerSection = request.substr(0, headerEnd);
+            body = request.substr(headerEnd + 4);
+            
+            // Parse headers
+            std::istringstream headerStream(headerSection);
+            std::string line;
+            bool firstLine = true;
+            while (std::getline(headerStream, line)) {
+                if (firstLine) {
+                    firstLine = false;
+                    continue; // Skip the request line
+                }
+                
+                if (line.empty() || line == "\r") continue;
+                
+                size_t colonPos = line.find(':');
+                if (colonPos != std::string::npos) {
+                    std::string key = line.substr(0, colonPos);
+                    std::string value = line.substr(colonPos + 1);
+                    
+                    // Trim whitespace
+                    key.erase(0, key.find_first_not_of(" \t\r\n"));
+                    key.erase(key.find_last_not_of(" \t\r\n") + 1);
+                    value.erase(0, value.find_first_not_of(" \t\r\n"));
+                    value.erase(value.find_last_not_of(" \t\r\n") + 1);
+                    
+                    headers[key] = value;
+                }
+            }
+        }
+        
+        // Call server's route handler
+        std::string response;
+        server_->handleRequest(method + " " + path + " HTTP/1.1\r\n" + 
+                              [&headers]() {
+                                  std::string headerStr;
+                                  for (const auto& [key, value] : headers) {
+                                      headerStr += key + ": " + value + "\r\n";
+                                  }
+                                  return headerStr;
+                              }() + "\r\n" + body, response);
+        
+        // Send the response
+        send(conn->socket, response.c_str(), response.length(), 0);
+        ::close(conn->socket);
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Exception in handleHttpRequest: " << e.what() << std::endl;
+        sendErrorResponse(conn, 500, "Internal Server Error");
+    }
 } 

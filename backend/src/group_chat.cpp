@@ -9,13 +9,19 @@ bool GroupChat::createGroup(const std::string& name, const std::string& descript
 }
 
 bool GroupChat::deleteGroup(int groupId, int userId) {
-    // TODO: Implement group deletion with permission check
-    return false;
+    // Check if user is admin of the group
+    if (!database_->isGroupAdmin(groupId, userId)) {
+        return false;
+    }
+    return database_->deleteGroup(groupId);
 }
 
 bool GroupChat::updateGroup(int groupId, const std::string& name, const std::string& description, int userId) {
-    // TODO: Implement group update with permission check
-    return false;
+    // Check if user is admin of the group
+    if (!database_->isGroupAdmin(groupId, userId)) {
+        return false;
+    }
+    return database_->updateGroup(groupId, name, description);
 }
 
 bool GroupChat::addMember(int groupId, int userId, const std::string& role) {
@@ -23,13 +29,19 @@ bool GroupChat::addMember(int groupId, int userId, const std::string& role) {
 }
 
 bool GroupChat::removeMember(int groupId, int userId, int adminId) {
-    // TODO: Implement member removal with permission check
+    // Check if adminId is admin of the group
+    if (!database_->isGroupAdmin(groupId, adminId)) {
+        return false;
+    }
     return database_->removeUserFromGroup(groupId, userId);
 }
 
 bool GroupChat::updateMemberRole(int groupId, int userId, const std::string& role, int adminId) {
-    // TODO: Implement role update with permission check
-    return false;
+    // Check if adminId is admin of the group
+    if (!database_->isGroupAdmin(groupId, adminId)) {
+        return false;
+    }
+    return database_->updateMemberRole(groupId, userId, role);
 }
 
 std::vector<Group> GroupChat::getUserGroups(int userId) {
@@ -41,21 +53,17 @@ std::vector<User> GroupChat::getGroupMembers(int groupId) {
 }
 
 Group GroupChat::getGroupById(int groupId) {
-    // TODO: Implement get group by ID
-    return Group{};
+    return database_->getGroupById(groupId);
 }
 
 bool GroupChat::isGroupAdmin(int groupId, int userId) {
-    // TODO: Implement admin check
-    return false;
+    return database_->isGroupAdmin(groupId, userId);
 }
 
 bool GroupChat::isGroupMember(int groupId, int userId) {
-    // TODO: Implement member check
-    return true;
+    return database_->isGroupMember(groupId, userId);
 }
 
 bool GroupChat::canManageGroup(int groupId, int userId) {
-    // TODO: Implement permission check
-    return false;
+    return database_->isGroupAdmin(groupId, userId);
 } 

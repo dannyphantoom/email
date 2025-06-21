@@ -48,125 +48,51 @@ const UnifiedInbox: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'inbox' | 'starred' | 'sent' | 'archive'>('inbox');
 
-  // Mock data for demonstration
   useEffect(() => {
-    const mockMessages: UnifiedMessage[] = [
-      {
-        id: '1',
-        accountId: 'gmail-1',
-        sender: 'john.doe@gmail.com',
-        recipient: 'user@gmail.com',
-        subject: 'Project Update - Q4 Goals',
-        content: 'Hi team, I wanted to share the latest updates on our Q4 project goals. We\'ve made significant progress on the frontend integration and the backend API is now fully functional.',
-        messageType: 'email',
-        timestamp: new Date(Date.now() - 1000 * 60 * 30).toISOString(), // 30 minutes ago
-        isRead: false,
-        isImportant: true,
-        attachments: ['project_update.pdf'],
-        metadata: {},
-        accountProvider: 'Gmail'
-      },
-      {
-        id: '2',
-        accountId: 'whatsapp-1',
-        sender: '+1234567890',
-        recipient: '+0987654321',
-        subject: 'Meeting Reminder',
-        content: 'Don\'t forget about our team meeting tomorrow at 10 AM!',
-        messageType: 'message',
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2 hours ago
-        isRead: true,
-        isImportant: false,
-        attachments: [],
-        metadata: {},
-        accountProvider: 'WhatsApp'
-      },
-      {
-        id: '3',
-        accountId: 'outlook-1',
-        sender: 'client@company.com',
-        recipient: 'user@outlook.com',
-        subject: 'Contract Review Request',
-        content: 'Please review the attached contract and let me know if you have any questions or concerns.',
-        messageType: 'email',
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), // 1 day ago
-        isRead: false,
-        isImportant: false,
-        attachments: ['contract_v2.pdf', 'terms.docx'],
-        metadata: {},
-        accountProvider: 'Outlook'
-      },
-      {
-        id: '4',
-        accountId: 'telegram-1',
-        sender: '@tech_news',
-        recipient: '@user',
-        subject: 'Breaking: New AI Developments',
-        content: 'Major breakthrough in AI technology announced today. Researchers have developed a new model that can...',
-        messageType: 'message',
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(), // 6 hours ago
-        isRead: true,
-        isImportant: true,
-        attachments: [],
-        metadata: {},
-        accountProvider: 'Telegram'
-      }
-    ];
-
-    const mockAccounts: ConnectedAccount[] = [
-      {
-        id: 'gmail-1',
-        type: 'email',
-        provider: 'Gmail',
-        email: 'user@gmail.com',
-        isActive: true,
-        lastSync: '2 minutes ago',
-        unreadCount: 2
-      },
-      {
-        id: 'outlook-1',
-        type: 'email',
-        provider: 'Outlook',
-        email: 'user@outlook.com',
-        isActive: true,
-        lastSync: '5 minutes ago',
-        unreadCount: 1
-      },
-      {
-        id: 'whatsapp-1',
-        type: 'messenger',
-        provider: 'WhatsApp',
-        username: '+1234567890',
-        isActive: true,
-        lastSync: '1 minute ago',
-        unreadCount: 0
-      },
-      {
-        id: 'telegram-1',
-        type: 'messenger',
-        provider: 'Telegram',
-        username: '@user',
-        isActive: true,
-        lastSync: '3 minutes ago',
-        unreadCount: 0
-      }
-    ];
-
-    setMessages(mockMessages);
-    setConnectedAccounts(mockAccounts);
+    fetchData();
   }, []);
 
-  const handleRefresh = async () => {
+  const fetchData = async () => {
     setIsLoading(true);
     try {
-      // TODO: Implement actual refresh logic
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      toast.success('Messages refreshed successfully');
+      // Fetch unified messages
+      const messagesRes = await fetch('/api/integration/messages', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      let messagesData: UnifiedMessage[] = [];
+      if (messagesRes.ok) {
+        const data = await messagesRes.json();
+        messagesData = data.data || [];
+      } else {
+        toast.error('Failed to load messages');
+      }
+      // Fetch connected accounts
+      const accountsRes = await fetch('/api/integration/accounts', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      let accountsData: ConnectedAccount[] = [];
+      if (accountsRes.ok) {
+        const data = await accountsRes.json();
+        accountsData = data.data || [];
+      } else {
+        toast.error('Failed to load accounts');
+      }
+      setMessages(messagesData);
+      setConnectedAccounts(accountsData);
     } catch (error) {
-      toast.error('Failed to refresh messages');
+      toast.error('Failed to load unified inbox');
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleRefresh = async () => {
+    fetchData();
+    toast.success('Messages refreshed successfully');
   };
 
   const handleMessageSelect = (message: UnifiedMessage) => {

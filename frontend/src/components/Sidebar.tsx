@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Search, Plus, Users, MessageCircle } from 'lucide-react';
+import { toast } from 'react-hot-toast';
+import Modal from './Modal';
 
 interface Chat {
   id: string;
@@ -8,6 +10,8 @@ interface Chat {
   timestamp: string;
   unreadCount: number;
   isGroup: boolean;
+  otherUserId?: number;
+  groupId?: number;
 }
 
 interface SidebarProps {
@@ -18,38 +22,141 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'chats' | 'groups'>('chats');
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [groups, setGroups] = useState<Chat[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isGroupModalOpen, setGroupModalOpen] = useState(false);
+  const [isNewChatModalOpen, setNewChatModalOpen] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [groupDescription, setGroupDescription] = useState('');
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
+  const [newChatUser, setNewChatUser] = useState('');
+  const [isStartingChat, setIsStartingChat] = useState(false);
 
-  // Mock data - replace with actual data from API
-  const chats: Chat[] = [
-    {
-      id: '1',
-      name: 'john@cockpit.com',
-      lastMessage: 'Hey, how are you doing?',
-      timestamp: '2:30 PM',
-      unreadCount: 2,
-      isGroup: false,
-    },
-    {
-      id: '2',
-      name: 'sarah@cockpit.com',
-      lastMessage: 'The meeting is scheduled for tomorrow',
-      timestamp: '1:45 PM',
-      unreadCount: 0,
-      isGroup: false,
-    },
-    {
-      id: '3',
-      name: 'Project Team',
-      lastMessage: 'Alice: Great work everyone!',
-      timestamp: '12:20 PM',
-      unreadCount: 5,
-      isGroup: true,
-    },
-  ];
+  const fetchChatSessions = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/chat-sessions', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const chatSessions = data.data.map((session: any) => ({
+          id: `chat-${session.id}`,
+          name: session.other_user_name || 'Unknown User',
+          lastMessage: session.last_message || 'No messages yet',
+          timestamp: new Date(session.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          unreadCount: session.unread_count || 0,
+          isGroup: false,
+          otherUserId: session.other_user_id
+        }));
+        setChats(chatSessions);
+      } else {
+        toast.error('Failed to load chat sessions');
+      }
+    } catch (error) {
+      console.error('Failed to fetch chat sessions:', error);
+      toast.error('Failed to load chat sessions');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-  const filteredChats = chats.filter(chat =>
-    chat.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const fetchGroups = useCallback(async () => {
+    try {
+      const response = await fetch('/api/groups', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const groupChats = data.data.map((group: any) => ({
+          id: `group-${group.id}`,
+          name: group.name,
+          lastMessage: 'Group chat',
+          timestamp: new Date(group.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          unreadCount: 0,
+          isGroup: true,
+          groupId: group.id
+        }));
+        setGroups(groupChats);
+      } else {
+        toast.error('Failed to load groups');
+      }
+    } catch (error) {
+      console.error('Failed to fetch groups:', error);
+      toast.error('Failed to load groups');
+    }
+  }, []);
+
+  // Fetch chat sessions and groups
+  useEffect(() => {
+    fetchChatSessions();
+    fetchGroups();
+  }, [fetchChatSessions, fetchGroups]);
+
+  const handleCreateGroup = async () => {
+    setGroupModalOpen(true);
+  };
+
+  const submitCreateGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!groupName.trim()) return;
+    setIsCreatingGroup(true);
+    try {
+      const response = await fetch('/api/groups', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ name: groupName, description: groupDescription })
+      });
+      if (response.ok) {
+        toast.success('Group created successfully');
+        fetchGroups();
+        setGroupModalOpen(false);
+        setGroupName('');
+        setGroupDescription('');
+      } else {
+        toast.error('Failed to create group');
+      }
+    } catch (error) {
+      console.error('Failed to create group:', error);
+      toast.error('Failed to create group');
+    } finally {
+      setIsCreatingGroup(false);
+    }
+  };
+
+  const handleNewConversation = () => {
+    setNewChatModalOpen(true);
+  };
+
+  const submitNewConversation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newChatUser.trim()) return;
+    setIsStartingChat(true);
+    // TODO: Implement user search and chat session creation
+    toast.success('New conversation started (placeholder)');
+    setNewChatModalOpen(false);
+    setNewChatUser('');
+    setIsStartingChat(false);
+  };
+
+  const getFilteredChats = () => {
+    const currentChats = activeTab === 'chats' ? chats : groups;
+    return currentChats.filter(chat =>
+      chat.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  };
+
+  const filteredChats = getFilteredChats();
 
   return (
     <div className="flex-1 flex flex-col">
@@ -95,10 +202,25 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
 
       {/* Chat List */}
       <div className="flex-1 overflow-y-auto">
-        {filteredChats.length === 0 ? (
+        {isLoading ? (
+          <div className="p-8 text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cockpit-400 mx-auto"></div>
+            <p className="text-dark-400 mt-2">Loading...</p>
+          </div>
+        ) : filteredChats.length === 0 ? (
           <div className="p-8 text-center">
             <MessageCircle className="w-12 h-12 text-dark-600 mx-auto mb-4" />
-            <p className="text-dark-400">No conversations found</p>
+            <p className="text-dark-400">
+              {activeTab === 'chats' ? 'No conversations yet' : 'No groups yet'}
+            </p>
+            {activeTab === 'groups' && (
+              <button
+                onClick={handleCreateGroup}
+                className="btn-primary mt-4 text-sm"
+              >
+                Create Group
+              </button>
+            )}
           </div>
         ) : (
           <div className="space-y-1 p-2">
@@ -141,11 +263,83 @@ const Sidebar: React.FC<SidebarProps> = ({ onChatSelect, selectedChat }) => {
 
       {/* New Chat Button */}
       <div className="p-4 border-t border-dark-700">
-        <button className="btn-primary w-full flex items-center justify-center space-x-2">
-          <Plus className="w-4 h-4" />
-          <span>New Conversation</span>
-        </button>
+        {activeTab === 'groups' ? (
+          <button 
+            onClick={handleCreateGroup}
+            className="btn-primary w-full flex items-center justify-center space-x-2"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Create Group</span>
+          </button>
+        ) : (
+          <button
+            onClick={handleNewConversation}
+            className="btn-primary w-full flex items-center justify-center space-x-2"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Conversation</span>
+          </button>
+        )}
       </div>
+      {/* Group Creation Modal */}
+      <Modal isOpen={isGroupModalOpen} onClose={() => setGroupModalOpen(false)} title="Create Group">
+        <form onSubmit={submitCreateGroup} className="space-y-4">
+          <div>
+            <label className="block text-sm text-dark-300 mb-1">Group Name</label>
+            <input
+              type="text"
+              value={groupName}
+              onChange={e => setGroupName(e.target.value)}
+              className="input-field w-full"
+              required
+              maxLength={50}
+              placeholder="Enter group name"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-dark-300 mb-1">Description</label>
+            <textarea
+              value={groupDescription}
+              onChange={e => setGroupDescription(e.target.value)}
+              className="input-field w-full"
+              maxLength={200}
+              placeholder="Enter group description (optional)"
+            />
+          </div>
+          <div className="flex justify-end space-x-2">
+            <button type="button" className="btn-secondary" onClick={() => setGroupModalOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" disabled={isCreatingGroup}>
+              {isCreatingGroup ? 'Creating...' : 'Create'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+      {/* New Conversation Modal */}
+      <Modal isOpen={isNewChatModalOpen} onClose={() => setNewChatModalOpen(false)} title="Start New Conversation">
+        <form onSubmit={submitNewConversation} className="space-y-4">
+          <div>
+            <label className="block text-sm text-dark-300 mb-1">Username or Email</label>
+            <input
+              type="text"
+              value={newChatUser}
+              onChange={e => setNewChatUser(e.target.value)}
+              className="input-field w-full"
+              required
+              placeholder="Enter username or email"
+            />
+          </div>
+          <div className="flex justify-end space-x-2">
+            <button type="button" className="btn-secondary" onClick={() => setNewChatModalOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" disabled={isStartingChat}>
+              {isStartingChat ? 'Starting...' : 'Start'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 };

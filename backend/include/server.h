@@ -16,6 +16,7 @@ class WebSocketHandler;
 class Database;
 class UserManager;
 class MessageHandler;
+class GroupChat;
 
 class Server {
 public:
@@ -31,6 +32,7 @@ public:
     std::shared_ptr<UserManager> getUserManager() const { return userManager_; }
     std::shared_ptr<MessageHandler> getMessageHandler() const { return messageHandler_; }
     std::shared_ptr<WebSocketHandler> getWebSocketHandler() const { return wsHandler_; }
+    std::shared_ptr<GroupChat> getGroupChat() const { return groupChat_; }
 
     // HTTP request handling
     void handleRequest(const std::string& request, std::string& response);
@@ -40,7 +42,9 @@ public:
     void handleAuthRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
     void handleUserRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
     void handleMessageRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
+    void handleChatSessionRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
     void handleGroupRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
+    void handleBackupRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
     void handleAccountIntegrationRoutes(const std::string& method, const std::string& path, const std::string& body, std::string& response);
     
     // CORS and utility functions
@@ -63,6 +67,7 @@ private:
     std::shared_ptr<UserManager> userManager_;
     std::shared_ptr<MessageHandler> messageHandler_;
     std::shared_ptr<WebSocketHandler> wsHandler_;
+    std::shared_ptr<GroupChat> groupChat_;
     
     // Connection management
     std::map<int, std::thread> clientThreads_;

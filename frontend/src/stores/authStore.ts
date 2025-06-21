@@ -7,6 +7,7 @@ interface User {
   email: string;
   publicKey: string;
   createdAt: string;
+  backupEmail?: string;
 }
 
 interface AuthState {

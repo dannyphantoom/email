@@ -102,6 +102,34 @@ bool Database::createTables() {
         )
     )";
     
+    const char* createChatSessionsTable = R"(
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            other_user_id INTEGER,
+            group_id INTEGER,
+            last_message TEXT,
+            last_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            unread_count INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            FOREIGN KEY (other_user_id) REFERENCES users (id),
+            FOREIGN KEY (group_id) REFERENCES groups (id)
+        )
+    )";
+    
+    const char* createChatBackupsTable = R"(
+        CREATE TABLE IF NOT EXISTS chat_backups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            backup_name TEXT NOT NULL,
+            backup_data TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            description TEXT,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    )";
+    
     char* errMsg = nullptr;
     
     if (sqlite3_exec(db_, createUsersTable, nullptr, nullptr, &errMsg) != SQLITE_OK) {
@@ -134,6 +162,18 @@ bool Database::createTables() {
         return false;
     }
     
+    if (sqlite3_exec(db_, createChatSessionsTable, nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        std::cerr << "Failed to create chat_sessions table: " << errMsg << std::endl;
+        sqlite3_free(errMsg);
+        return false;
+    }
+    
+    if (sqlite3_exec(db_, createChatBackupsTable, nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        std::cerr << "Failed to create chat_backups table: " << errMsg << std::endl;
+        sqlite3_free(errMsg);
+        return false;
+    }
+    
     return true;
 }
 
@@ -148,7 +188,13 @@ bool Database::createIndexes() {
         "CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id)",
         "CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)",
-        "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)"
+        "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_other_user ON chat_sessions(other_user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_group ON chat_sessions(group_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON chat_sessions(updated_at)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_backups_user ON chat_backups(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_backups_created ON chat_backups(created_at)"
     };
     
     char* errMsg = nullptr;
@@ -611,4 +657,346 @@ std::string Database::encryptData(const std::string& data) {
 std::string Database::decryptData(const std::string& encryptedData) {
     // TODO: Implement actual decryption
     return encryptedData;
+}
+
+// Group management methods
+Group Database::getGroupById(int groupId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "SELECT id, name, description, creator_id, created_at FROM groups WHERE id = ?";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return Group{};
+    }
+    
+    sqlite3_bind_int(stmt, 1, groupId);
+    
+    Group group{};
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        group.id = sqlite3_column_int(stmt, 0);
+        group.name = (const char*)sqlite3_column_text(stmt, 1);
+        group.description = (const char*)sqlite3_column_text(stmt, 2);
+        group.creator_id = sqlite3_column_int(stmt, 3);
+        group.created_at = (const char*)sqlite3_column_text(stmt, 4);
+    }
+    
+    sqlite3_finalize(stmt);
+    return group;
+}
+
+bool Database::updateGroup(int groupId, const std::string& name, const std::string& description) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "UPDATE groups SET name = ?, description = ? WHERE id = ?";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, description.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 3, groupId);
+    
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    
+    return rc == SQLITE_DONE;
+}
+
+bool Database::deleteGroup(int groupId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "DELETE FROM groups WHERE id = ?";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_int(stmt, 1, groupId);
+    
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    
+    return rc == SQLITE_DONE;
+}
+
+bool Database::isGroupMember(int groupId, int userId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ?";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_int(stmt, 1, groupId);
+    sqlite3_bind_int(stmt, 2, userId);
+    
+    bool isMember = false;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        isMember = sqlite3_column_int(stmt, 0) > 0;
+    }
+    
+    sqlite3_finalize(stmt);
+    return isMember;
+}
+
+bool Database::isGroupAdmin(int groupId, int userId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ? AND role = 'admin'";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_int(stmt, 1, groupId);
+    sqlite3_bind_int(stmt, 2, userId);
+    
+    bool isAdmin = false;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        isAdmin = sqlite3_column_int(stmt, 0) > 0;
+    }
+    
+    sqlite3_finalize(stmt);
+    return isAdmin;
+}
+
+bool Database::updateMemberRole(int groupId, int userId, const std::string& role) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_text(stmt, 1, role.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, groupId);
+    sqlite3_bind_int(stmt, 3, userId);
+    
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    
+    return rc == SQLITE_DONE;
+}
+
+// Chat session methods
+bool Database::createOrUpdateChatSession(int userId, int otherUserId, int groupId, 
+                                        const std::string& lastMessage, int unreadCount) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "INSERT OR REPLACE INTO chat_sessions (user_id, other_user_id, group_id, last_message, unread_count, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_int(stmt, 1, userId);
+    sqlite3_bind_int(stmt, 2, otherUserId);
+    sqlite3_bind_int(stmt, 3, groupId);
+    sqlite3_bind_text(stmt, 4, lastMessage.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 5, unreadCount);
+    
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    
+    return rc == SQLITE_DONE;
+}
+
+std::vector<ChatSession> Database::getUserChatSessions(int userId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "SELECT id, user_id, other_user_id, group_id, last_message, last_timestamp, unread_count, updated_at FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return {};
+    }
+    
+    sqlite3_bind_int(stmt, 1, userId);
+    
+    std::vector<ChatSession> sessions;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        ChatSession session;
+        session.id = sqlite3_column_int(stmt, 0);
+        session.user_id = sqlite3_column_int(stmt, 1);
+        session.other_user_id = sqlite3_column_int(stmt, 2);
+        session.group_id = sqlite3_column_int(stmt, 3);
+        session.last_message = (const char*)sqlite3_column_text(stmt, 4);
+        session.last_timestamp = (const char*)sqlite3_column_text(stmt, 5);
+        session.unread_count = sqlite3_column_int(stmt, 6);
+        session.updated_at = (const char*)sqlite3_column_text(stmt, 7);
+        sessions.push_back(session);
+    }
+    
+    sqlite3_finalize(stmt);
+    return sessions;
+}
+
+bool Database::updateChatSessionUnreadCount(int sessionId, int unreadCount) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "UPDATE chat_sessions SET unread_count = ? WHERE id = ?";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_int(stmt, 1, unreadCount);
+    sqlite3_bind_int(stmt, 2, sessionId);
+    
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    
+    return rc == SQLITE_DONE;
+}
+
+bool Database::deleteChatSession(int sessionId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "DELETE FROM chat_sessions WHERE id = ?";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_int(stmt, 1, sessionId);
+    
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    
+    return rc == SQLITE_DONE;
+}
+
+// Backup methods
+bool Database::createChatBackup(int userId, const std::string& backupName, 
+                               const std::string& backupData, const std::string& description) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "INSERT INTO chat_backups (user_id, backup_name, backup_data, description) VALUES (?, ?, ?, ?)";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_int(stmt, 1, userId);
+    sqlite3_bind_text(stmt, 2, backupName.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, backupData.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, description.c_str(), -1, SQLITE_STATIC);
+    
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    
+    return rc == SQLITE_DONE;
+}
+
+std::vector<ChatBackup> Database::getUserBackups(int userId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "SELECT id, user_id, backup_name, backup_data, created_at, description FROM chat_backups WHERE user_id = ? ORDER BY created_at DESC";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return {};
+    }
+    
+    sqlite3_bind_int(stmt, 1, userId);
+    
+    std::vector<ChatBackup> backups;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        ChatBackup backup;
+        backup.id = sqlite3_column_int(stmt, 0);
+        backup.user_id = sqlite3_column_int(stmt, 1);
+        backup.backup_name = (const char*)sqlite3_column_text(stmt, 2);
+        backup.backup_data = (const char*)sqlite3_column_text(stmt, 3);
+        backup.created_at = (const char*)sqlite3_column_text(stmt, 4);
+        backup.description = (const char*)sqlite3_column_text(stmt, 5);
+        backups.push_back(backup);
+    }
+    
+    sqlite3_finalize(stmt);
+    return backups;
+}
+
+ChatBackup Database::getBackupById(int backupId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "SELECT id, user_id, backup_name, backup_data, created_at, description FROM chat_backups WHERE id = ?";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return ChatBackup{};
+    }
+    
+    sqlite3_bind_int(stmt, 1, backupId);
+    
+    ChatBackup backup{};
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        backup.id = sqlite3_column_int(stmt, 0);
+        backup.user_id = sqlite3_column_int(stmt, 1);
+        backup.backup_name = (const char*)sqlite3_column_text(stmt, 2);
+        backup.backup_data = (const char*)sqlite3_column_text(stmt, 3);
+        backup.created_at = (const char*)sqlite3_column_text(stmt, 4);
+        backup.description = (const char*)sqlite3_column_text(stmt, 5);
+    }
+    
+    sqlite3_finalize(stmt);
+    return backup;
+}
+
+bool Database::deleteBackup(int backupId, int userId) {
+    std::lock_guard<std::mutex> lock(dbMutex_);
+    
+    const char* sql = "DELETE FROM chat_backups WHERE id = ? AND user_id = ?";
+    sqlite3_stmt* stmt;
+    
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        return false;
+    }
+    
+    sqlite3_bind_int(stmt, 1, backupId);
+    sqlite3_bind_int(stmt, 2, userId);
+    
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    
+    return rc == SQLITE_DONE;
+}
+
+bool Database::restoreFromBackup(int backupId, int userId) {
+    // This is a placeholder - actual restoration logic would depend on the backup format
+    // For now, we just verify the backup exists and belongs to the user
+    ChatBackup backup = getBackupById(backupId);
+    if (backup.id == 0 || backup.user_id != userId) {
+        return false;
+    }
+    
+    // TODO: Implement actual restoration logic based on backup_data format
+    std::cout << "Restoring backup: " << backup.backup_name << std::endl;
+    return true;
 } 

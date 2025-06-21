@@ -8,6 +8,7 @@ import Register from './pages/Register';
 import Messenger from './pages/Messenger';
 import AccountIntegration from './pages/AccountIntegration';
 import UnifiedInbox from './pages/UnifiedInbox';
+import BackupManager from './pages/BackupManager';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -46,6 +47,10 @@ function App() {
             <Route 
               path="/inbox" 
               element={isAuthenticated ? <UnifiedInbox /> : <Navigate to="/login" />} 
+            />
+            <Route 
+              path="/backup" 
+              element={isAuthenticated ? <BackupManager /> : <Navigate to="/login" />} 
             />
             <Route 
               path="/" 
