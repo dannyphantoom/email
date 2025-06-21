@@ -1094,21 +1094,31 @@ bool Database::createOrUpdateChatSession(int userId, int otherUserId, int groupI
                                         const std::string& lastMessage, int unreadCount) {
     std::lock_guard<std::mutex> lock(dbMutex_);
     
-    const char* sql = "INSERT OR REPLACE INTO chat_sessions (user_id, other_user_id, group_id, last_message, unread_count, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))";
+    const char* sql = "INSERT OR REPLACE INTO chat_sessions (user_id, other_user_id, group_id, last_message, last_timestamp, unread_count, updated_at) VALUES (?, ?, ?, ?, datetime('now'), ?, datetime('now'))";
     sqlite3_stmt* stmt;
     
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-        std::cerr << "Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
+        std::cerr << "[DEBUG] Failed to prepare statement: " << sqlite3_errmsg(db_) << std::endl;
         return false;
     }
     
     sqlite3_bind_int(stmt, 1, userId);
     sqlite3_bind_int(stmt, 2, otherUserId);
-    sqlite3_bind_int(stmt, 3, groupId);
+    // Bind group_id as NULL for direct chats
+    if (groupId == 0) {
+        sqlite3_bind_null(stmt, 3);
+    } else {
+        sqlite3_bind_int(stmt, 3, groupId);
+    }
     sqlite3_bind_text(stmt, 4, lastMessage.c_str(), -1, SQLITE_STATIC);
     sqlite3_bind_int(stmt, 5, unreadCount);
     
     int rc = sqlite3_step(stmt);
+    if (rc != SQLITE_DONE) {
+        std::cerr << "[DEBUG] sqlite3_step failed: " << sqlite3_errmsg(db_) << " (rc=" << rc << ")" << std::endl;
+    } else {
+        std::cout << "[DEBUG] Chat session created/updated successfully for user " << userId << " with other user " << otherUserId << std::endl;
+    }
     sqlite3_finalize(stmt);
     
     return rc == SQLITE_DONE;

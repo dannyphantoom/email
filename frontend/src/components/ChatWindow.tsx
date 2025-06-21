@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Paperclip, Smile, MoreVertical, Download, Upload, Users, MessageCircle, Trash2, X } from 'lucide-react';
+import { Send, Paperclip, Smile, MoreVertical, Download, Upload, Users, MessageCircle, Trash2, X, LogOut } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'react-hot-toast';
 import { useAuthStore } from '../stores/authStore';
@@ -419,6 +419,34 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId }) => {
     }
   };
 
+  const handleLeaveGroup = async () => {
+    if (!chatInfo) return;
+    if (!window.confirm('Are you sure you want to leave this group?')) return;
+    
+    try {
+      const groupId = chatId.replace('group-', '');
+      const response = await fetch(`/api/groups/${groupId}/leave`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.ok) {
+        toast.success('Left group successfully');
+        setGroupInfoModalOpen(false);
+        // Redirect to main page or refresh
+        window.location.reload();
+      } else {
+        const error = await response.json();
+        toast.error(error.message || 'Failed to leave group');
+      }
+    } catch (error) {
+      console.error('Failed to leave group:', error);
+      toast.error('Failed to leave group');
+    }
+  };
+
   // Emoji picker component
   const EmojiPicker = () => {
     const emojis = ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩', '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣', '😖', '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬', '🤯', '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗', '🤔', '🤭', '🤫', '🤥', '😶', '😐', '😑', '😯', '😦', '😧', '😮', '😲', '🥱', '😴', '🤤', '😪', '😵', '🤐', '🥴', '🤢', '🤮', '🤧', '😷', '🤒', '🤕', '🤑', '🤠', '💩', '👻', '💀', '☠️', '👽', '👾', '🤖', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾', '🙈', '🙉', '🙊', '👶', '👧', '🧒', '👦', '👩', '🧑', '👨', '👵', '🧓', '👴', '👮‍♀️', '👮', '👮‍♂️', '🕵️‍♀️', '🕵️', '🕵️‍♂️', '💂‍♀️', '💂', '💂‍♂️', '👷‍♀️', '👷', '👷‍♂️', '🤴', '👸', '👳‍♀️', '👳', '👳‍♂️', '👲', '🧕', '🤵', '👰', '🤰', '🤱', '👼', '🎅', '🤶', '🧙‍♀️', '🧙', '🧙‍♂️', '🧝‍♀️', '🧝', '🧝‍♂️', '🧛‍♀️', '🧛', '🧛‍♂️', '🧟‍♀️', '🧟', '🧟‍♂️', '🧞‍♀️', '🧞', '🧞‍♂️', '🧜‍♀️', '🧜', '🧜‍♂️', '🧚‍♀️', '🧚', '🧚‍♂️', '👼', '🤰', '🤱', '👼', '🎅', '🤶', '🧙‍♀️', '🧙', '🧙‍♂️', '🧝‍♀️', '🧝', '🧝‍♂️', '🧛‍♀️', '🧛', '🧛‍♂️', '🧟‍♀️', '🧟', '🧟‍♂️', '🧞‍♀️', '🧞', '🧞‍♂️', '🧜‍♀️', '🧜', '🧜‍♂️', '🧚‍♀️', '🧚', '🧚‍♂️'];
@@ -756,15 +784,24 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId }) => {
                 <span className="text-dark-400">Members:</span>
                 <span className="text-white">{groupMembers.length}</span>
               </div>
-              {chatInfo.is_admin && (
+              <div className="flex space-x-2">
                 <button
-                  onClick={handleDeleteGroup}
-                  className="btn-danger w-full mt-2 flex items-center justify-center space-x-2"
+                  onClick={handleLeaveGroup}
+                  className="btn-secondary w-full flex items-center justify-center space-x-2"
                 >
-                  <Trash2 className="w-4 h-4" />
-                  <span>Delete Group</span>
+                  <LogOut className="w-4 h-4" />
+                  <span>Leave Group</span>
                 </button>
-              )}
+                {chatInfo.is_admin && (
+                  <button
+                    onClick={handleDeleteGroup}
+                    className="btn-danger w-full flex items-center justify-center space-x-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete Group</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Invite User */}

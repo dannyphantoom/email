@@ -17,6 +17,7 @@
 #include <thread>
 #include <chrono>
 #include <fcntl.h>
+#include <algorithm>
 
 using json = nlohmann::json;
 
@@ -46,6 +47,9 @@ void Server::setupRoutes() {
     routes["/users"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
         handleUserRoutes(method, path, body, headers, response);
     };
+    routes["/api/users"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleUserRoutes(method, path, body, headers, response);
+    };
     routes["/messages"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
         handleMessageRoutes(method, path, body, headers, response);
     };
@@ -59,6 +63,9 @@ void Server::setupRoutes() {
     
     // Chat sessions routes
     routes["/chat-sessions"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
+        handleChatSessionRoutes(method, path, body, headers, response);
+    };
+    routes["/api/chat-sessions"] = [this](const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
         handleChatSessionRoutes(method, path, body, headers, response);
     };
     
@@ -276,40 +283,23 @@ std::string Server::getAuthToken(const std::map<std::string, std::string>& heade
 
 void Server::handleAccountIntegrationRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
     try {
-        // Extract Authorization header from the request headers
-        std::string userId;
-        std::cout << "[DEBUG] Initial userId: " << userId << std::endl;
-        
-        // Accept both 'Authorization' and 'authorization' headers (case-insensitive)
+        // Extract user ID from Authorization header
+        int userIdInt = 0; // Default for development
         auto authIt = headers.find("Authorization");
-        if (authIt == headers.end()) {
-            authIt = headers.find("authorization");
-        }
         if (authIt != headers.end()) {
             std::string authHeader = authIt->second;
-            std::cout << "[DEBUG] Authorization header: " << authHeader << std::endl;
             if (authHeader.find("Bearer ") == 0) {
                 std::string token = authHeader.substr(7);
-                std::cout << "[DEBUG] Extracted token: " << token << std::endl;
-                int userIdInt;
                 if (userManager_->validateSessionToken(token, userIdInt)) {
-                    userId = std::to_string(userIdInt);
-                    std::cout << "[DEBUG] Token validation SUCCESS for user: " << userId << std::endl;
+                    // userIdInt is already set by validateSessionToken
                 } else {
-                    std::cout << "[DEBUG] Token validation FAILED for token: " << token << std::endl;
-                    response = createErrorResponse("Invalid or expired token", true);
+                    response = createErrorResponse("Invalid token", true);
                     return;
                 }
-            } else {
-                std::cout << "[DEBUG] Authorization header does not start with 'Bearer '" << std::endl;
-                response = createErrorResponse("Invalid authorization header format", true);
-                return;
             }
-        } else {
-            std::cout << "[DEBUG] Authorization header not found" << std::endl;
-            response = createErrorResponse("Authorization header required", true);
-            return;
         }
+        
+        std::string userId = std::to_string(userIdInt);
         
         if (method == "GET" && path == "/integration/accounts") {
             // Get user's connected accounts
@@ -461,29 +451,140 @@ void Server::handleAuthRoutes(const std::string& method, const std::string& path
 }
 
 void Server::handleUserRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
-    response = createErrorResponse("Not implemented", true);
+    std::cout << "[DEBUG] handleUserRoutes called with:" << std::endl;
+    std::cout << "[DEBUG] Method: " << method << std::endl;
+    std::cout << "[DEBUG] Path: " << path << std::endl;
+    std::cout << "[DEBUG] Body: " << body << std::endl;
+    
+    // Debug headers
+    std::cout << "[DEBUG] Headers received:" << std::endl;
+    for (const auto& header : headers) {
+        std::cout << "[DEBUG] Header: " << header.first << " = " << header.second << std::endl;
+    }
+    
+    try {
+        // Extract user ID from Authorization header
+        int userIdInt = 0; // Initialize to 0
+        std::string authHeader;
+        for (const auto& header : headers) {
+            std::string headerName = header.first;
+            std::transform(headerName.begin(), headerName.end(), headerName.begin(), ::tolower);
+            if (headerName == "authorization") {
+                authHeader = header.second;
+                break;
+            }
+        }
+        
+        if (!authHeader.empty()) {
+            std::cout << "[DEBUG] Authorization header found: " << authHeader << std::endl;
+            if (authHeader.find("Bearer ") == 0) {
+                std::string token = authHeader.substr(7);
+                std::cout << "[DEBUG] Token extracted: " << token << std::endl;
+                if (!userManager_->validateSessionToken(token, userIdInt)) {
+                    std::cout << "[DEBUG] Token validation failed" << std::endl;
+                    response = createErrorResponse("Unauthorized", true);
+                    return;
+                }
+            }
+        } else {
+            std::cout << "[DEBUG] No Authorization header found" << std::endl;
+        }
+        
+        if (method == "GET" && (path == "/users" || path == "/api/users")) {
+            std::cout << "[DEBUG] Getting all users" << std::endl;
+            // Get all users (for search functionality)
+            auto users = userManager_->getAllUsers();
+            json usersArray = json::array();
+            
+            for (const auto& user : users) {
+                // Don't include the current user in the results
+                if (user.id != userIdInt) {
+                    json userJson;
+                    userJson["id"] = user.id;
+                    userJson["username"] = user.username;
+                    userJson["email"] = user.email;
+                    userJson["is_online"] = user.is_online;
+                    userJson["created_at"] = user.created_at;
+                    
+                    usersArray.push_back(userJson);
+                }
+            }
+            
+            response = createJSONResponse(true, "Users retrieved successfully", usersArray.dump(), true);
+        }
+        else if (method == "GET" && (path.find("/users/search/") == 0 || path.find("/api/users/search/") == 0)) {
+            std::cout << "[DEBUG] Searching users" << std::endl;
+            // Search users by username
+            size_t searchStart = path.find("/users/search/") != std::string::npos ? path.find("/users/search/") + 13 : path.find("/api/users/search/") + 17;
+            std::string searchTerm = path.substr(searchStart);
+            
+            // Remove leading slash if present
+            if (!searchTerm.empty() && searchTerm[0] == '/') {
+                searchTerm = searchTerm.substr(1);
+            }
+            
+            std::cout << "[DEBUG] Search term: '" << searchTerm << "'" << std::endl;
+            
+            auto users = userManager_->getAllUsers();
+            std::cout << "[DEBUG] Found " << users.size() << " total users" << std::endl;
+            json usersArray = json::array();
+            
+            // Convert search term to lowercase for case-insensitive search
+            std::string searchTermLower = searchTerm;
+            std::transform(searchTermLower.begin(), searchTermLower.end(), searchTermLower.begin(), ::tolower);
+            
+            for (const auto& user : users) {
+                std::cout << "[DEBUG] Checking user: " << user.username << " (ID: " << user.id << ")" << std::endl;
+                // Don't include the current user in the results
+                if (user.id != userIdInt) {
+                    // Convert username to lowercase for case-insensitive comparison
+                    std::string usernameLower = user.username;
+                    std::transform(usernameLower.begin(), usernameLower.end(), usernameLower.begin(), ::tolower);
+                    
+                    if (usernameLower.find(searchTermLower) != std::string::npos) {
+                        std::cout << "[DEBUG] User " << user.username << " matches search term" << std::endl;
+                        json userJson;
+                        userJson["id"] = user.id;
+                        userJson["username"] = user.username;
+                        userJson["email"] = user.email;
+                        userJson["is_online"] = user.is_online;
+                        userJson["created_at"] = user.created_at;
+                        
+                        usersArray.push_back(userJson);
+                    }
+                }
+            }
+            
+            std::cout << "[DEBUG] Returning " << usersArray.size() << " matching users" << std::endl;
+            response = createJSONResponse(true, "Users found successfully", usersArray.dump(), true);
+        }
+        else {
+            std::cout << "[DEBUG] Method not allowed: " << method << " " << path << std::endl;
+            response = createErrorResponse("Method not allowed", true);
+        }
+    } catch (const std::exception& e) {
+        std::cout << "[DEBUG] Exception in handleUserRoutes: " << e.what() << std::endl;
+        response = createErrorResponse("Internal server error: " + std::string(e.what()), true);
+    }
 }
 
 void Server::handleMessageRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
     try {
         // Extract user ID from Authorization header
-        std::string userId = "1"; // Default for development
+        int userIdInt = 0; // Default for development
         auto authIt = headers.find("Authorization");
         if (authIt != headers.end()) {
             std::string authHeader = authIt->second;
             if (authHeader.find("Bearer ") == 0) {
                 std::string token = authHeader.substr(7);
-                int userIdInt;
                 if (userManager_->validateSessionToken(token, userIdInt)) {
-                    userId = std::to_string(userIdInt);
+                    // userIdInt is already set by validateSessionToken
                 } else {
                     response = createErrorResponse("Unauthorized", true);
                     return;
                 }
             }
         }
-        
-        int userIdInt = std::stoi(userId);
         
         if (method == "GET" && path.find("/messages/") == 0) {
             // Get messages for a chat session
@@ -545,8 +646,8 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
     std::cout << "[DEBUG] Body: " << body << std::endl;
     
     // Extract user ID from Authorization header
-    std::string userId;
-    std::cout << "[DEBUG] Initial userId: " << userId << std::endl;
+    int userIdInt = 0;
+    std::cout << "[DEBUG] Initial userIdInt: " << userIdInt << std::endl;
     
     // Accept both 'Authorization' and 'authorization' headers (case-insensitive)
     auto authIt = headers.find("Authorization");
@@ -559,13 +660,12 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
         if (authHeader.find("Bearer ") == 0) {
             std::string token = authHeader.substr(7);
             std::cout << "[DEBUG] Extracted token: " << token << std::endl;
-            int userIdInt;
             if (userManager_->validateSessionToken(token, userIdInt)) {
-                userId = std::to_string(userIdInt);
-                std::cout << "[DEBUG] Token validation SUCCESS for user: " << userId << std::endl;
+                std::cout << "[DEBUG] Token validation SUCCESS for user: " << userIdInt << std::endl;
+                std::cout << "[DEBUG] userIdInt after token validation: " << userIdInt << std::endl;
             } else {
                 std::cout << "[DEBUG] Token validation FAILED for token: " << token << std::endl;
-                response = createErrorResponse("Invalid or expired token", true);
+                response = createErrorResponse("Invalid token", true);
                 return;
             }
         } else {
@@ -579,11 +679,9 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
         return;
     }
     
-    std::cout << "[DEBUG] Final User ID from token: " << userId << std::endl;
+    std::cout << "[DEBUG] Final User ID from token: " << userIdInt << std::endl;
     
     try {
-        int userIdInt = std::stoi(userId);
-        
         if (method == "POST" && (path == "/groups" || path == "/api/groups")) {
             // Create new group
             std::cout << "[DEBUG] Creating group for user " << userIdInt << std::endl;
@@ -767,6 +865,25 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
                 response = createJSONResponse(true, "Member removed successfully", "", true);
             } else {
                 response = createErrorResponse("Failed to remove member", true);
+            }
+        }
+        else if (method == "POST" && (path.find("/groups/") == 0 || path.find("/api/groups/") == 0) && path.find("/leave") != std::string::npos) {
+            // Leave group
+            size_t groupIdStart = path.find("/groups/") != std::string::npos ? path.find("/groups/") + 8 : path.find("/api/groups/") + 12;
+            size_t groupIdEnd = path.find("/leave");
+            int groupId = std::stoi(path.substr(groupIdStart, groupIdEnd - groupIdStart));
+            
+            if (!groupChat_->isGroupMember(groupId, userIdInt)) {
+                response = createErrorResponse("Not a member of this group", true);
+                return;
+            }
+            
+            bool success = groupChat_->leaveGroup(groupId, userIdInt);
+            
+            if (success) {
+                response = createJSONResponse(true, "Left group successfully", "", true);
+            } else {
+                response = createErrorResponse("Failed to leave group", true);
             }
         }
         else if (method == "PUT" && (path.find("/groups/") == 0 || path.find("/api/groups/") == 0)) {
@@ -1007,13 +1124,18 @@ void Server::handleGroupRoutes(const std::string& method, const std::string& pat
 
 void Server::handleBackupRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
     try {
-        std::string userId = getAuthToken(headers);
-        if (userId.empty()) {
-            response = createErrorResponse("Unauthorized", true);
-            return;
+        int userIdInt = 0;
+        auto authIt = headers.find("Authorization");
+        if (authIt != headers.end()) {
+            std::string authHeader = authIt->second;
+            if (authHeader.find("Bearer ") == 0) {
+                std::string token = authHeader.substr(7);
+                if (!userManager_->validateSessionToken(token, userIdInt)) {
+                    response = createErrorResponse("Unauthorized", true);
+                    return;
+                }
+            }
         }
-        
-        int userIdInt = std::stoi(userId);
         
         if (method == "POST" && path == "/backup") {
             // Create chat backup
@@ -1104,62 +1226,244 @@ void Server::handleBackupRoutes(const std::string& method, const std::string& pa
 }
 
 void Server::handleChatSessionRoutes(const std::string& method, const std::string& path, const std::string& body, const std::map<std::string, std::string>& headers, std::string& response) {
-    std::cout << "[DEBUG] handleChatSessionRoutes called with:" << std::endl;
-    std::cout << "[DEBUG] Method: " << method << std::endl;
-    std::cout << "[DEBUG] Path: " << path << std::endl;
-    std::cout << "[DEBUG] Body: " << body << std::endl;
-    for (const auto& [k, v] : headers) {
-        std::cout << "[DEBUG] Header: " << k << " = " << v << std::endl;
+    std::cout << "[DEBUG] handleChatSessionRoutes called with method: " << method << ", path: " << path << std::endl;
+    std::cout << "[DEBUG] Request body: " << body << std::endl;
+    
+    int userIdInt = 0; // Default for development
+    // Accept both 'Authorization' and 'authorization' headers (case-insensitive)
+    auto authIt = headers.find("Authorization");
+    if (authIt == headers.end()) {
+        authIt = headers.find("authorization");
     }
-    try {
-        // Extract user ID from Authorization header
-        std::string userId = "1"; // Default for development
-        auto authIt = headers.find("Authorization");
-        if (authIt != headers.end()) {
-            std::string authHeader = authIt->second;
-            if (authHeader.find("Bearer ") == 0) {
-                std::string token = authHeader.substr(7);
-                std::cout << "[DEBUG] Extracted token: " << token << std::endl;
-                int userIdInt;
-                if (userManager_->validateSessionToken(token, userIdInt)) {
-                    userId = std::to_string(userIdInt);
-                    std::cout << "[DEBUG] Token validation SUCCESS for user: " << userId << std::endl;
-                } else {
-                    std::cout << "[DEBUG] Token validation FAILED for token: " << token << std::endl;
-                    response = createErrorResponse("Invalid token", true);
+    if (authIt != headers.end()) {
+        std::string authHeader = authIt->second;
+        if (authHeader.find("Bearer ") == 0) {
+            std::string token = authHeader.substr(7);
+            if (userManager_->validateSessionToken(token, userIdInt)) {
+                std::cout << "[DEBUG] Token validation successful for user: " << userIdInt << std::endl;
+            } else {
+                std::cout << "[DEBUG] Token validation failed" << std::endl;
+                response = createErrorResponse("Invalid token", true);
+                return;
+            }
+        }
+    } else {
+        std::cout << "[DEBUG] No Authorization header found" << std::endl;
+    }
+    
+    if (method == "GET" && path == "/chat-sessions") {
+        std::cout << "[DEBUG] Getting chat sessions for user: " << userIdInt << std::endl;
+        // Get user's chat sessions
+        auto sessions = database_->getUserChatSessions(userIdInt);
+        json sessionsArray = json::array();
+        for (const auto& session : sessions) {
+            json sessionJson;
+            sessionJson["id"] = session.id;
+            sessionJson["other_user_id"] = session.other_user_id;
+            sessionJson["group_id"] = session.group_id;
+            sessionJson["last_message"] = session.last_message;
+            sessionJson["last_timestamp"] = session.last_timestamp;
+            sessionJson["unread_count"] = session.unread_count;
+            sessionJson["updated_at"] = session.updated_at;
+            if (session.other_user_id > 0) {
+                User otherUser = database_->getUserById(session.other_user_id);
+                sessionJson["other_user_name"] = otherUser.username;
+            }
+            sessionsArray.push_back(sessionJson);
+        }
+        response = createJSONResponse(true, "Chat sessions retrieved successfully", sessionsArray.dump(), true);
+    } else if (method == "POST" && path == "/api/chat-sessions") {
+        // Create new chat session
+        std::cout << "[DEBUG] Creating chat session" << std::endl;
+        std::cout << "[DEBUG] Request body: " << body << std::endl;
+        
+        try {
+            json requestJson = json::parse(body);
+            int otherUserId = requestJson["other_user_id"];
+            std::cout << "[DEBUG] Other user ID: " << otherUserId << std::endl;
+            std::cout << "[DEBUG] Current user ID: " << userIdInt << std::endl;
+            
+            // Check if other user exists
+            User otherUser = userManager_->getUserById(otherUserId);
+            std::cout << "[DEBUG] Other user lookup result - ID: " << otherUser.id << ", Username: " << otherUser.username << std::endl;
+            if (otherUser.id == 0) {
+                std::cout << "[DEBUG] User not found" << std::endl;
+                response = createErrorResponse("User not found", true);
+                return;
+            }
+            
+            // Check if chat session already exists
+            auto existingSessions = database_->getUserChatSessions(userIdInt);
+            std::cout << "[DEBUG] Found " << existingSessions.size() << " existing sessions" << std::endl;
+            for (const auto& session : existingSessions) {
+                std::cout << "[DEBUG] Checking session with other_user_id: " << session.other_user_id << std::endl;
+                if (session.other_user_id == otherUserId) {
+                    std::cout << "[DEBUG] Chat session already exists" << std::endl;
+                    response = createErrorResponse("Chat session already exists", true);
                     return;
                 }
             }
-        }
-        
-        int userIdInt = std::stoi(userId);
-        std::cout << "[DEBUG] User ID from token: " << userId << std::endl;
-        
-        if (method == "GET" && path == "/chat-sessions") {
-            // Get user's chat sessions
-            auto sessions = database_->getUserChatSessions(userIdInt);
-            json sessionsArray = json::array();
-            for (const auto& session : sessions) {
+            
+            // Create new chat session
+            std::cout << "[DEBUG] Attempting to create chat session..." << std::endl;
+            bool success = database_->createOrUpdateChatSession(userIdInt, otherUserId, 0, "", 0);
+            std::cout << "[DEBUG] Chat session creation result: " << (success ? "SUCCESS" : "FAILED") << std::endl;
+            
+            if (success) {
+                // Also create session for the other user
+                std::cout << "[DEBUG] Creating reverse session..." << std::endl;
+                bool reverseSuccess = database_->createOrUpdateChatSession(otherUserId, userIdInt, 0, "", 0);
+                std::cout << "[DEBUG] Reverse session creation result: " << (reverseSuccess ? "SUCCESS" : "FAILED") << std::endl;
+                
                 json sessionJson;
-                sessionJson["id"] = session.id;
-                sessionJson["other_user_id"] = session.other_user_id;
-                sessionJson["group_id"] = session.group_id;
-                sessionJson["last_message"] = session.last_message;
-                sessionJson["last_timestamp"] = session.last_timestamp;
-                sessionJson["unread_count"] = session.unread_count;
-                sessionJson["updated_at"] = session.updated_at;
-                if (session.other_user_id > 0) {
-                    User otherUser = database_->getUserById(session.other_user_id);
-                    sessionJson["other_user_name"] = otherUser.username;
-                }
-                sessionsArray.push_back(sessionJson);
+                sessionJson["id"] = 0; // Will be set by database
+                sessionJson["other_user_id"] = otherUserId;
+                sessionJson["last_message"] = "";
+                sessionJson["unread_count"] = 0;
+                
+                std::cout << "[DEBUG] Returning success response" << std::endl;
+                response = createJSONResponse(true, "Chat session created successfully", sessionJson.dump(), true);
+            } else {
+                std::cout << "[DEBUG] Returning failure response" << std::endl;
+                response = createErrorResponse("Failed to create chat session", true);
             }
-            response = createJSONResponse(true, "Chat sessions retrieved successfully", sessionsArray.dump(), true);
-        } else {
-            response = createErrorResponse("Method not allowed", true);
+        } catch (const json::exception& e) {
+            std::cout << "[DEBUG] JSON parsing error: " << e.what() << std::endl;
+            response = createErrorResponse("Invalid JSON in request body", true);
+        } catch (const std::exception& e) {
+            std::cout << "[DEBUG] Exception in chat session creation: " << e.what() << std::endl;
+            response = createErrorResponse("Internal server error during chat session creation", true);
         }
-    } catch (const std::exception& e) {
-        response = createErrorResponse("Internal server error: " + std::string(e.what()), true);
+    } else if (method == "GET" && (path.find("/chat-sessions/") == 0 || path.find("/api/chat-sessions/") == 0) && path.find("/messages") != std::string::npos) {
+        // Get messages for a specific chat session
+        std::cout << "[DEBUG] Getting messages for chat session" << std::endl;
+        
+        // Extract session ID from path
+        size_t sessionIdStart = path.find("/chat-sessions/") != std::string::npos ? path.find("/chat-sessions/") + 14 : path.find("/api/chat-sessions/") + 19;
+        size_t sessionIdEnd = path.find("/messages");
+        std::string sessionIdStr = path.substr(sessionIdStart, sessionIdEnd - sessionIdStart);
+        int sessionId = std::stoi(sessionIdStr);
+        
+        std::cout << "[DEBUG] Session ID: " << sessionId << std::endl;
+        
+        // Verify user has access to this chat session and get the other user ID
+        auto sessions = database_->getUserChatSessions(userIdInt);
+        bool hasAccess = false;
+        int otherUserId = 0;
+        for (const auto& session : sessions) {
+            if (session.id == sessionId) {
+                hasAccess = true;
+                otherUserId = session.other_user_id;
+                break;
+            }
+        }
+        
+        if (!hasAccess) {
+            std::cout << "[DEBUG] User does not have access to session " << sessionId << std::endl;
+            response = createErrorResponse("Access denied to this chat session", true);
+            return;
+        }
+        
+        std::cout << "[DEBUG] Other user ID: " << otherUserId << std::endl;
+        
+        // Get messages for this session using the other user ID
+        auto messages = database_->getMessages(userIdInt, otherUserId, 50);
+        json messagesArray = json::array();
+        
+        for (const auto& msg : messages) {
+            json messageJson;
+            messageJson["id"] = msg.id;
+            messageJson["content"] = msg.content;
+            messageJson["sender_id"] = msg.sender_id;
+            messageJson["timestamp"] = msg.timestamp;
+            messageJson["is_read"] = msg.is_read;
+            messageJson["message_type"] = msg.message_type;
+            
+            // Get sender name
+            User sender = database_->getUserById(msg.sender_id);
+            messageJson["sender_name"] = sender.username;
+            
+            messagesArray.push_back(messageJson);
+        }
+        
+        std::cout << "[DEBUG] Returning " << messagesArray.size() << " messages" << std::endl;
+        response = createJSONResponse(true, "Messages retrieved successfully", messagesArray.dump(), true);
+        std::cout << "[DEBUG] Response: " << response << std::endl;
+    } else if (method == "POST" && (path.find("/chat-sessions/") == 0 || path.find("/api/chat-sessions/") == 0) && path.find("/messages") != std::string::npos) {
+        // Send a message in a specific chat session
+        std::cout << "[DEBUG] Sending message in chat session" << std::endl;
+        std::cout << "[DEBUG] Request body: " << body << std::endl;
+        try {
+            // Extract session ID from path
+            size_t sessionIdStart = path.find("/chat-sessions/") != std::string::npos ? path.find("/chat-sessions/") + 14 : path.find("/api/chat-sessions/") + 19;
+            size_t sessionIdEnd = path.find("/messages");
+            std::string sessionIdStr = path.substr(sessionIdStart, sessionIdEnd - sessionIdStart);
+            int sessionId = std::stoi(sessionIdStr);
+            std::cout << "[DEBUG] Session ID: " << sessionId << std::endl;
+
+            // Verify user has access to this chat session
+            auto sessions = database_->getUserChatSessions(userIdInt);
+            bool hasAccess = false;
+            int otherUserId = 0;
+            for (const auto& session : sessions) {
+                if (session.id == sessionId) {
+                    hasAccess = true;
+                    otherUserId = session.other_user_id;
+                    break;
+                }
+            }
+            std::cout << "[DEBUG] hasAccess: " << hasAccess << ", otherUserId: " << otherUserId << std::endl;
+            if (!hasAccess || otherUserId == 0) {
+                std::cout << "[DEBUG] User does not have access to session or invalid otherUserId" << std::endl;
+                response = createErrorResponse("Access denied to this chat session", true);
+                std::cout << "[DEBUG] Response: " << response << std::endl;
+                return;
+            }
+
+            try {
+                json requestJson = json::parse(body);
+                std::string content = requestJson["content"];
+                std::string messageType = requestJson.value("type", "text");
+                std::cout << "[DEBUG] Message content: " << content << ", messageType: " << messageType << std::endl;
+                std::cout << "[DEBUG] userIdInt: " << userIdInt << ", otherUserId: " << otherUserId << std::endl;
+
+                // Create and save the message
+                Message message;
+                message.sender_id = userIdInt;
+                message.receiver_id = otherUserId;
+                message.content = content;
+                message.message_type = messageType;
+                std::cout << "[DEBUG] About to call saveMessage" << std::endl;
+                bool success = database_->saveMessage(message);
+                std::cout << "[DEBUG] saveMessage result: " << (success ? "SUCCESS" : "FAILED") << std::endl;
+                if (success) {
+                    // Update the chat session with the new message
+                    database_->createOrUpdateChatSession(userIdInt, otherUserId, 0, content, 0);
+                    database_->createOrUpdateChatSession(otherUserId, userIdInt, 0, content, 1); // Increment unread count for other user
+                    std::cout << "[DEBUG] Message sent successfully" << std::endl;
+                    response = createJSONResponse(true, "Message sent successfully", "", true);
+                } else {
+                    std::cout << "[DEBUG] Failed to send message" << std::endl;
+                    response = createErrorResponse("Failed to send message", true);
+                }
+                std::cout << "[DEBUG] Response: " << response << std::endl;
+            } catch (const json::exception& e) {
+                std::cout << "[DEBUG] JSON parsing error: " << e.what() << std::endl;
+                response = createErrorResponse("Invalid JSON in request body", true);
+                std::cout << "[DEBUG] Response: " << response << std::endl;
+            } catch (const std::exception& e) {
+                std::cout << "[DEBUG] Exception in message sending: " << e.what() << std::endl;
+                response = createErrorResponse("Internal server error during message sending", true);
+                std::cout << "[DEBUG] Response: " << response << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "[DEBUG] Outer exception in POST /chat-sessions/{{id}}/messages: " << e.what() << std::endl;
+            response = createErrorResponse("Internal server error during chat session lookup", true);
+            std::cout << "[DEBUG] Response: " << response << std::endl;
+        }
+    } else {
+        std::cout << "[DEBUG] Method not allowed: " << method << " " << path << std::endl;
+        response = createErrorResponse("Method not allowed", true);
     }
 }
 
@@ -1217,12 +1521,22 @@ void Server::handleRequest(const std::string& request, std::string& response) {
         std::function<void(const std::string&, const std::string&, const std::string&, const std::map<std::string, std::string>&, std::string&)> routeHandler = nullptr;
         std::string matchedPrefix;
         
+        // Sort routes by length (longest first) to ensure more specific routes are matched
+        std::vector<std::pair<std::string, std::function<void(const std::string&, const std::string&, const std::string&, const std::map<std::string, std::string>&, std::string&)>>> sortedRoutes;
         for (const auto& [prefix, handler] : routes) {
+            sortedRoutes.push_back({prefix, handler});
+        }
+        
+        std::sort(sortedRoutes.begin(), sortedRoutes.end(), 
+            [](const auto& a, const auto& b) {
+                return a.first.length() > b.first.length();
+            });
+        
+        for (const auto& [prefix, handler] : sortedRoutes) {
             if (path.substr(0, prefix.length()) == prefix) {
-                if (prefix.length() > matchedPrefix.length()) {
-                    matchedPrefix = prefix;
-                    routeHandler = handler;
-                }
+                matchedPrefix = prefix;
+                routeHandler = handler;
+                break; // Use the first (longest) match
             }
         }
         

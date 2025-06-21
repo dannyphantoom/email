@@ -53,6 +53,50 @@ bool GroupChat::updateMemberRole(int groupId, int userId, const std::string& rol
     return database_->updateMemberRole(groupId, userId, role);
 }
 
+bool GroupChat::leaveGroup(int groupId, int userId) {
+    // Check if user is a member of the group
+    if (!database_->isGroupMember(groupId, userId)) {
+        std::cerr << "User " << userId << " is not a member of group " << groupId << std::endl;
+        return false;
+    }
+    
+    // Check if user is admin
+    bool isAdmin = database_->isGroupAdmin(groupId, userId);
+    
+    // Remove user from group
+    bool removed = database_->removeUserFromGroup(groupId, userId);
+    if (!removed) {
+        std::cerr << "Failed to remove user " << userId << " from group " << groupId << std::endl;
+        return false;
+    }
+    
+    // If user was admin, check if there are other members and promote one to admin
+    if (isAdmin) {
+        auto members = database_->getGroupMembers(groupId);
+        if (members.size() > 0) {
+            // Promote the first remaining member to admin
+            int newAdminId = members[0].id;
+            bool promoted = database_->updateMemberRole(groupId, newAdminId, "admin");
+            if (promoted) {
+                std::cout << "Promoted user " << newAdminId << " to admin of group " << groupId << std::endl;
+            } else {
+                std::cerr << "Failed to promote user " << newAdminId << " to admin of group " << groupId << std::endl;
+            }
+        } else {
+            // No members left, delete the group
+            std::cout << "No members left in group " << groupId << ", deleting group" << std::endl;
+            bool deleted = database_->deleteGroup(groupId);
+            if (deleted) {
+                std::cout << "Group " << groupId << " deleted successfully" << std::endl;
+            } else {
+                std::cerr << "Failed to delete group " << groupId << std::endl;
+            }
+        }
+    }
+    
+    return true;
+}
+
 std::vector<Group> GroupChat::getUserGroups(int userId) {
     return database_->getUserGroups(userId);
 }

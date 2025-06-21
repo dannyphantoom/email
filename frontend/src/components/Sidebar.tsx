@@ -40,6 +40,8 @@ const Sidebar = forwardRef<unknown, SidebarProps>(({ onChatSelect, selectedChat 
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
   const [inviteUsername, setInviteUsername] = useState('');
   const [isInvitingUser, setIsInvitingUser] = useState(false);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   const fetchChatSessions = useCallback(async () => {
     try {
@@ -154,15 +156,65 @@ const Sidebar = forwardRef<unknown, SidebarProps>(({ onChatSelect, selectedChat 
     setNewChatModalOpen(true);
   };
 
-  const submitNewConversation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newChatUser.trim()) return;
-    setIsStartingChat(true);
-    // TODO: Implement user search and chat session creation
-    toast.success('New conversation started (placeholder)');
-    setNewChatModalOpen(false);
-    setNewChatUser('');
-    setIsStartingChat(false);
+  const handleUserSearch = async (searchTerm: string) => {
+    console.log('handleUserSearch called with:', searchTerm);
+    if (!searchTerm.trim()) {
+      console.log('Empty search term, clearing results');
+      setSearchResults([]);
+      return;
+    }
+    
+    setIsSearching(true);
+    try {
+      console.log('Making search request to:', `/api/users/search/${encodeURIComponent(searchTerm)}`);
+      const response = await fetch(`/api/users/search/${encodeURIComponent(searchTerm)}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      console.log('Search response status:', response.status);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Search response data:', data);
+        setSearchResults(data.data || []);
+      } else {
+        console.error('Failed to search users:', response.status);
+        setSearchResults([]);
+      }
+    } catch (error) {
+      console.error('Failed to search users:', error);
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleStartConversation = async (userId: number, username: string) => {
+    try {
+      const response = await fetch('/api/chat-sessions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ other_user_id: userId })
+      });
+      
+      if (response.ok) {
+        toast.success(`Started conversation with ${username}`);
+        setNewChatModalOpen(false);
+        setNewChatUser('');
+        setSearchResults([]);
+        await fetchChatSessions(); // Refresh chat sessions
+      } else {
+        const error = await response.json();
+        toast.error(error.message || 'Failed to start conversation');
+      }
+    } catch (error) {
+      console.error('Failed to start conversation:', error);
+      toast.error('Failed to start conversation');
+    }
   };
 
   const handleGroupClick = async (group: Chat) => {
@@ -265,6 +317,32 @@ const Sidebar = forwardRef<unknown, SidebarProps>(({ onChatSelect, selectedChat 
       }
     } catch (error) {
       toast.error('Failed to delete group');
+    }
+  };
+
+  const handleLeaveGroup = async () => {
+    if (!selectedGroupInfo) return;
+    if (!window.confirm('Are you sure you want to leave this group?')) return;
+    
+    try {
+      const response = await fetch(`/api/groups/${selectedGroupInfo.id}/leave`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.ok) {
+        toast.success('Left group successfully');
+        setGroupInfoModalOpen(false);
+        await fetchGroups(); // Refresh groups list
+      } else {
+        const error = await response.json();
+        toast.error(error.message || 'Failed to leave group');
+      }
+    } catch (error) {
+      console.error('Failed to leave group:', error);
+      toast.error('Failed to leave group');
     }
   };
 
@@ -472,15 +550,24 @@ const Sidebar = forwardRef<unknown, SidebarProps>(({ onChatSelect, selectedChat 
                 <span className="text-dark-400">Members:</span>
                 <span className="text-white">{groupMembers.length}</span>
               </div>
-              {selectedGroupInfo.is_admin && (
+              <div className="flex space-x-2">
                 <button
-                  onClick={handleDeleteGroup}
-                  className="btn-danger w-full mt-2 flex items-center justify-center space-x-2"
+                  onClick={handleLeaveGroup}
+                  className="btn-secondary w-full flex items-center justify-center space-x-2"
                 >
-                  <Trash2 className="w-4 h-4" />
-                  <span>Delete Group</span>
+                  <LogOut className="w-4 h-4" />
+                  <span>Leave Group</span>
                 </button>
-              )}
+                {selectedGroupInfo.is_admin && (
+                  <button
+                    onClick={handleDeleteGroup}
+                    className="btn-danger w-full flex items-center justify-center space-x-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete Group</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Invite User */}
@@ -542,27 +629,76 @@ const Sidebar = forwardRef<unknown, SidebarProps>(({ onChatSelect, selectedChat 
 
       {/* New Conversation Modal */}
       <Modal isOpen={isNewChatModalOpen} onClose={() => setNewChatModalOpen(false)} title="Start New Conversation">
-        <form onSubmit={submitNewConversation} className="space-y-4">
+        <div className="space-y-4">
           <div>
-            <label className="block text-sm text-dark-300 mb-1">Username or Email</label>
+            <label className="block text-sm text-dark-300 mb-1">Search Users</label>
             <input
               type="text"
               value={newChatUser}
-              onChange={e => setNewChatUser(e.target.value)}
+              onChange={e => {
+                setNewChatUser(e.target.value);
+                handleUserSearch(e.target.value);
+              }}
               className="input-field w-full"
-              required
-              placeholder="Enter username or email"
+              placeholder="Enter username to search"
             />
           </div>
+          
+          {/* Search Results */}
+          {isSearching && (
+            <div className="text-center py-4">
+              <div className="text-dark-400 text-sm">Searching...</div>
+            </div>
+          )}
+          
+          {!isSearching && searchResults.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium text-white mb-2">Found Users ({searchResults.length})</h4>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {searchResults.map((user: any) => {
+                  console.log('Rendering user:', user);
+                  return (
+                    <div key={user.id} className="flex items-center justify-between p-2 bg-dark-800 rounded">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-8 h-8 bg-gradient-to-r from-cockpit-600 to-purple-600 rounded-full flex items-center justify-center">
+                          <span className="text-white text-sm font-medium">
+                            {user.username.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-white text-sm font-medium">{user.username}</span>
+                          <div className="text-dark-400 text-xs">{user.email}</div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleStartConversation(user.id, user.username)}
+                        className="btn-primary px-3 py-1 text-xs"
+                      >
+                        Start Chat
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          
+          {!isSearching && newChatUser.trim() && searchResults.length === 0 && (
+            <div className="text-center py-4">
+              <div className="text-dark-400 text-sm">No users found</div>
+            </div>
+          )}
+          
           <div className="flex justify-end space-x-2">
-            <button type="button" className="btn-secondary" onClick={() => setNewChatModalOpen(false)}>
+            <button type="button" className="btn-secondary" onClick={() => {
+              setNewChatModalOpen(false);
+              setNewChatUser('');
+              setSearchResults([]);
+            }}>
               Cancel
             </button>
-            <button type="submit" className="btn-primary" disabled={isStartingChat}>
-              {isStartingChat ? 'Starting...' : 'Start'}
-            </button>
           </div>
-        </form>
+        </div>
       </Modal>
     </div>
   );

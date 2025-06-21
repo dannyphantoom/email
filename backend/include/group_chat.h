@@ -18,6 +18,7 @@ public:
     bool addMember(int groupId, int userId, const std::string& role = "member");
     bool removeMember(int groupId, int userId, int adminId);
     bool updateMemberRole(int groupId, int userId, const std::string& role, int adminId);
+    bool leaveGroup(int groupId, int userId);
     
     // Group queries
     std::vector<Group> getUserGroups(int userId);
